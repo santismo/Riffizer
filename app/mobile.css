@@ -1,0 +1,3 @@
+body { -webkit-tap-highlight-color: transparent; }
+button { touch-action: manipulation; }
+button:active { transform: scale(.98); }
