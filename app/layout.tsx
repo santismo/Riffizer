@@ -17,7 +17,11 @@ export const metadata: Metadata = {
     images: [{ url: "/og.png", width: 1536, height: 1024, alt: "Riffizer guitar riff generator" }],
   },
   twitter: { card: "summary_large_image", title: "Riffizer — Guitar Riff Generator", images: ["/og.png"] },
-  icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+  icons: {
+    icon: [{ url: "/riffizer-icon.svg", type: "image/svg+xml" }],
+    shortcut: "/riffizer-icon.svg",
+    apple: [{ url: "/riffizer-icon-180.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) { return <html lang="en"><body>{children}</body></html>; }
