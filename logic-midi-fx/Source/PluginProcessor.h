@@ -37,6 +37,9 @@ public:
   void setStateInformation(const void*, int) override;
 
   void setGeneratedIdea(const juce::var& payload);
+  void clearGeneratedIdea();
+  juce::var generatedPayload() const;
+  juce::String chordNames() const;
   double projectTempo() const noexcept { return currentProjectTempo.load(std::memory_order_relaxed); }
   juce::File createDragMidiFile(const ExportOptions&) const;
   bool writeMidiFile(const juce::File&, const ExportOptions&) const;
@@ -56,6 +59,8 @@ private:
   static void addMidiTrack(juce::MidiFile&, const Sequence&, Lane, const juce::String&, double, const ExportOptions&);
   static void addMergedTrack(juce::MidiFile&, const Sequence&, const juce::String&, double, const ExportOptions&);
   std::shared_ptr<const Sequence> sequence;
+  mutable juce::CriticalSection payloadLock;
+  juce::var latestPayload;
   double currentSampleRate = 44100.0;
   std::atomic<double> currentProjectTempo { 0.0 };
 

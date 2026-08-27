@@ -18,6 +18,7 @@ private:
   RiffizerMIDIFXAudioProcessor& ownerProcessor;
   std::unique_ptr<juce::WebBrowserComponent> browser;
   std::unique_ptr<RiffizerMidiDragButton> dragButton;
+  std::unique_ptr<juce::TextButton> copyButton;
   RiffizerMIDIFXAudioProcessor::ExportOptions dragOptions;
   juce::File currentDragFile;
 

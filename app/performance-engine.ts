@@ -470,25 +470,72 @@ function harmonyForSection(profile: PerformanceProfile, progression: string[], m
   return events.sort((a, b) => a.time - b.time || a.bar - b.bar);
 }
 
-function chordRhythmForSection(profile: PerformanceProfile, progression: string[], meterMap: MeterMap, section: SectionType): HarmonyEvent[] {
+function nearestTimeDistance(time: number, events: PerformanceEvent[]) {
+  return events.length ? Math.min(...events.map((event) => Math.abs(event.time - time))) : 99;
+}
+
+function chordRhythmCellScore(profile: PerformanceProfile, cell: ChordRhythmCell, start: number, barBeats: number, section: SectionType, riff: PerformanceEvent[]) {
+  const barRiff = riff.filter((event) => event.time >= start - .01 && event.time < start + barBeats - .01);
+  if (!barRiff.length) return cell.finalHold ? 5 : 0;
+  const peakVelocity = Math.max(...barRiff.map((event) => event.velocity));
+  const riffAccents = barRiff.filter((event) => event.velocity >= Math.max(.72, peakVelocity - .045));
+  const alignmentBias = profile.riff === "rock" || profile.riff === "interlock" || profile.riff === "sequence" ? .68
+    : profile.riff === "fusion" || profile.riff === "angular" ? .52 : .36;
+  const targetDensity: Record<RiffKind, number> = { melodic: 2.3, rock: 3.8, interlock: 5.1, pedal: 3.7, fusion: 4.4, sequence: 4.8, angular: 4.3 };
+  const alignmentWindow = Math.max(.1, barBeats / 32);
+  const openSpaceWindow = Math.max(.24, barBeats / 14);
+  let score = -Math.abs(cell.hits.length - targetDensity[profile.riff]) * 1.4;
+  let aligned = 0; let answers = 0; let clutter = 0;
+
+  cell.hits.forEach((fraction, hit) => {
+    const time = start + fraction * barBeats;
+    const accentDistance = nearestTimeDistance(time, riffAccents);
+    const riffDistance = nearestTimeDistance(time, barRiff);
+    if (accentDistance <= alignmentWindow) { aligned += 1; score += 2.3 + alignmentBias * 2.5; }
+    else if (riffDistance >= openSpaceWindow) { answers += 1; score += 2.2 + (1 - alignmentBias) * 2.4; }
+    else if (riffDistance <= alignmentWindow) { clutter += 1; score -= 2.8 - alignmentBias * 1.4; }
+    else score += .35;
+    if (cell.accents.includes(hit) && (accentDistance <= alignmentWindow || riffDistance >= openSpaceWindow)) score += 1.15;
+  });
+
+  if (aligned === 0) score -= profile.riff === "melodic" ? 1.5 : 4;
+  if (answers === 0 && profile.riff !== "rock" && profile.riff !== "sequence") score -= 2.8;
+  if (aligned > 0 && answers > 0) score += 3.2;
+  if (clutter > Math.ceil(cell.hits.length / 2)) score -= 5;
+  if (section === "Chorus" && cell.hits[0] === 0) score += 1.8;
+  return score + Math.random() * .75;
+}
+
+function chordRhythmForSection(profile: PerformanceProfile, progression: string[], meterMap: MeterMap, section: SectionType, riff: PerformanceEvent[]): HarmonyEvent[] {
   const cells = chordRhythmBooks[profile.riff];
+  let previousCell = "";
   return progression.flatMap((chord, bar) => {
     const meter = meterMap.meters[bar]; const start = meterMap.starts[bar]; const barBeats = meter.beatsPerBar;
-    const cell = cells[(bar + (section === "Chorus" ? 1 : 0) + Math.floor(Math.random() * cells.length)) % cells.length];
+    const ranked = cells.map((cell) => ({ cell, score: chordRhythmCellScore(profile, cell, start, barBeats, section, riff) - (cell.id === previousCell ? 2.2 : 0) })).sort((a, b) => b.score - a.score);
+    const cell = ranked[0].cell;
+    previousCell = cell.id;
+    const barRiff = riff.filter((event) => event.time >= start - .01 && event.time < start + barBeats - .01);
+    const peakVelocity = barRiff.length ? Math.max(...barRiff.map((event) => event.velocity)) : 0;
+    const riffAccents = barRiff.filter((event) => event.velocity >= Math.max(.72, peakVelocity - .045));
     return cell.hits.map((fraction, hit) => {
       const nextFraction = cell.hits[hit + 1] ?? 1;
-      const duration = cell.finalHold && hit === cell.hits.length - 1
+      const time = start + barBeats * fraction;
+      const aligned = nearestTimeDistance(time, riffAccents) <= Math.max(.1, barBeats / 32);
+      const inSpace = nearestTimeDistance(time, barRiff) >= Math.max(.24, barBeats / 14);
+      let duration = cell.finalHold && hit === cell.hits.length - 1
         ? Math.max(.26, barBeats * (1 - fraction) * .86)
         : Math.min(barBeats * (cell.lengths[hit] ?? .16), Math.max(.12, barBeats * (nextFraction - fraction) - .045));
-      const voicing = createChordPreview(chord, profile.position + ((bar + hit) % 3) - 1);
+      const nextRiff = barRiff.find((event) => event.time > time + .09);
+      if (inSpace && nextRiff) duration = Math.min(duration, Math.max(.12, nextRiff.time - time - .045));
+      const voicing = createChordPreview(chord, profile.position + (bar % 3) - 1);
       const accented = cell.accents.includes(hit);
       return {
         ...voicing,
         chord,
         bar,
-        time: start + barBeats * fraction,
+        time,
         duration,
-        velocity: accented ? .82 : .6,
+        velocity: aligned ? (accented ? .86 : .74) : inSpace ? (accented ? .78 : .66) : (accented ? .7 : .56),
       };
     });
   }).sort((a, b) => a.time - b.time || a.bar - b.bar);
@@ -498,7 +545,7 @@ export function createPerformanceIdea(artist: Artist, section: SectionType, prog
   const profile = performanceProfiles[artist]; const meterMap = meterMapFor(profile, artist, progression.length, rhythmComplexity); const plans = makeRiffPlans(profile, artist, progression.length, section, complexity); const cursor: RiffCursor = { midi: 59 + complexity, handPosition: profile.position };
   const riff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, meterMap.starts[bar], meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor));
   const harmony = harmonyForSection(profile, progression, meterMap, rhythmComplexity);
-  const chordRhythm = chordRhythmForSection(profile, progression, meterMap, section);
+  const chordRhythm = chordRhythmForSection(profile, progression, meterMap, section, riff);
   const tempoLift = section === "Solo" ? 8 : section === "Chorus" ? 4 : 0;
   return { tempo: profile.tempo + tempoLift + Math.floor(Math.random() * 7) - 3, riffStyle: profile.riffLabel, meter: meterMap.meters[0], meterMap, harmony, chordRhythm, riff };
 }
@@ -609,5 +656,26 @@ export function scorePerformanceIdea(artist: Artist, section: SectionType, idea:
   if (stabs.some((event) => !event.notes.length || event.duration < .08)) score -= 20;
   const stabSignatures = idea.meterMap.meters.map((meter, bar) => rhythmSignature(stabs, idea.meterMap.starts[bar], idea.meterMap.starts[bar] + meter.beatsPerBar));
   score += new Set(stabSignatures).size > 1 || stabSignatures.length === 1 ? 3 : -2;
+  let accentLocks = 0; let gapAnswers = 0; let ordinaryCollisions = 0;
+  stabs.forEach((stab) => {
+    const bar = Math.max(0, stab.bar);
+    const start = idea.meterMap.starts[bar] ?? 0;
+    const beats = idea.meterMap.meters[bar]?.beatsPerBar ?? 4;
+    const barRiff = events.filter((event) => event.time >= start - .01 && event.time < start + beats - .01);
+    if (!barRiff.length) return;
+    const peak = Math.max(...barRiff.map((event) => event.velocity));
+    const accents = barRiff.filter((event) => event.velocity >= Math.max(.72, peak - .045));
+    const accentDistance = nearestTimeDistance(stab.time, accents);
+    const riffDistance = nearestTimeDistance(stab.time, barRiff);
+    if (accentDistance <= Math.max(.1, beats / 32)) accentLocks += 1;
+    else if (riffDistance >= Math.max(.24, beats / 14)) gapAnswers += 1;
+    else if (riffDistance <= Math.max(.1, beats / 32)) ordinaryCollisions += 1;
+  });
+  score += Math.min(accentLocks, idea.meterMap.meters.length * 2) * 1.25;
+  score += Math.min(gapAnswers, idea.meterMap.meters.length * 2) * (profile.riff === "melodic" ? 1.55 : 1.05);
+  score -= ordinaryCollisions * (profile.riff === "rock" || profile.riff === "sequence" ? .55 : 1.25);
+  if (accentLocks === 0) score -= 5;
+  if (gapAnswers === 0 && !["rock", "sequence"].includes(profile.riff)) score -= 3;
+  if (accentLocks > 0 && gapAnswers > 0) score += 4;
   return score;
 }

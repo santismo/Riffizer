@@ -11,8 +11,8 @@ The public Site is available at [riffizer.ojertrejo.chatgpt.site](https://riffiz
 - Builds a chord chart and a playable riff together, with optional chord-harmony
   playback and MIDI export.
 - Creates a separate style-aware **Chord rhythm** lane: compact playable chord
-  stabs whose rhythm is generated from the selected profile while the chart
-  remains unchanged.
+  stabs whose rhythm is generated from the selected profile and scored against
+  the riff's accents and gaps while the chart remains unchanged.
 - Keeps the chart fixed when using **Regenerate riff**. Only **Riffize** creates
   a new progression.
 - Keeps whole-section continuity: a new part considers the prior landing,
@@ -49,12 +49,14 @@ produce the Pages artifact in `dist/client`.
 `logic-midi-fx/` builds an Apple Audio Unit MIDI Processor with the same
 Riffizer UI and generator. It follows Logic's project tempo and outputs
 generated MIDI while the transport runs, with the existing **Riff**,
-**Harmony**, and **Chord rhythm** controls selecting the live MIDI lanes. In
-the plug-in, the single native **HOLD + DRAG MIDI → LOGIC** button above the UI
-starts a file drag with no save dialog: **Multi tracks** carries
+**Harmony**, and **Chord rhythm** controls selecting the live MIDI lanes. The
+compact black **Drag MIDI** control sits beside **Copy Chord Names** above the
+plug-in UI and starts a file drag with no save dialog: **Multi tracks** carries
 named riff, chord-chart, and chord-rhythm lanes; **Single track** merges them.
 Its export controls can route guitar strings to MIDI channels 1–6, with
-optional channel inversion.
+optional channel inversion. Generated arrangements and playback/export settings
+are stored in the Audio Unit state, so closing and reopening its window—or the
+Logic project—restores the current idea.
 
 ```sh
 npm ci

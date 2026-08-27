@@ -16,14 +16,27 @@ bool truthy(const juce::var& payload, const juce::Identifier& name, bool fallbac
 }
 }
 
-class RiffizerMidiDragButton final : public juce::TextButton {
+class RiffizerBlackButton : public juce::TextButton {
+public:
+  explicit RiffizerBlackButton(const juce::String& label) : juce::TextButton(label) {}
+
+  void paintButton(juce::Graphics& graphics, bool highlighted, bool down) override {
+    const auto background = down ? juce::Colour(0xff242424) : highlighted ? juce::Colour(0xff191919) : juce::Colour(0xff050505);
+    graphics.setColour(background);
+    graphics.fillRoundedRectangle(getLocalBounds().toFloat(), 5.0f);
+    graphics.setColour(highlighted ? juce::Colour(0xff6b6b68) : juce::Colour(0xff353533));
+    graphics.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), 5.0f, 1.0f);
+    graphics.setColour(juce::Colour(0xfff1f1ec));
+    graphics.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+    graphics.drawFittedText(getButtonText(), getLocalBounds().reduced(8, 0), juce::Justification::centred, 1);
+  }
+};
+
+class RiffizerMidiDragButton final : public RiffizerBlackButton {
 public:
   explicit RiffizerMidiDragButton(std::function<void()> onBeginDrag)
-    : juce::TextButton("HOLD + DRAG MIDI  →  LOGIC"), beginDrag(std::move(onBeginDrag)) {
+    : RiffizerBlackButton("DRAG MIDI"), beginDrag(std::move(onBeginDrag)) {
     setTooltip("Hold, then drag this MIDI into Logic's Tracks area");
-    setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(35, 96, 145));
-    setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(51, 135, 191));
-    setColour(juce::TextButton::textColourOffId, juce::Colours::white);
   }
 
   void mouseDown(const juce::MouseEvent& event) override {
@@ -52,11 +65,23 @@ RiffizerMIDIFXAudioProcessorEditor::RiffizerMIDIFXAudioProcessorEditor(RiffizerM
     .withNativeIntegrationEnabled()
     .withKeepPageLoadedWhenBrowserIsHidden()
     .withEventListener("riffizerIdea", [this](juce::var payload) { ownerProcessor.setGeneratedIdea(payload); })
+    .withEventListener("riffizerClearIdea", [this](juce::var) { ownerProcessor.clearGeneratedIdea(); })
+    .withEventListener("riffizerRestoreReady", [this](juce::var) {
+      const auto payload = ownerProcessor.generatedPayload();
+      if (!payload.isVoid() && browser != nullptr) browser->emitEventIfBrowserIsVisible("riffizerRestoreIdea", payload);
+    })
     .withEventListener("riffizerDragSettings", [this](juce::var payload) { updateDragSettings(payload); })
     .withResourceProvider([](const juce::String& path) { return webResource(path); }, juce::WebBrowserComponent::getResourceProviderRoot());
   browser = std::make_unique<juce::WebBrowserComponent>(options);
   dragButton = std::make_unique<RiffizerMidiDragButton>([this] { beginMidiDrag(); });
+  copyButton = std::make_unique<RiffizerBlackButton>("COPY CHORD NAMES");
+  copyButton->setTooltip("Copy the generated chord names as comma-separated text");
+  copyButton->onClick = [this] {
+    const auto names = ownerProcessor.chordNames();
+    if (names.isNotEmpty()) juce::SystemClipboard::copyTextToClipboard(names);
+  };
   addAndMakeVisible(*browser);
+  addAndMakeVisible(*copyButton);
   addAndMakeVisible(*dragButton);
   browser->goToURL(juce::WebBrowserComponent::getResourceProviderRoot());
   startTimerHz(4);
@@ -68,14 +93,16 @@ RiffizerMIDIFXAudioProcessorEditor::~RiffizerMIDIFXAudioProcessorEditor() = defa
 
 void RiffizerMIDIFXAudioProcessorEditor::resized() {
   auto area = getLocalBounds();
-  dragButton->setBounds(area.removeFromTop(46).reduced(8, 5));
+  auto controls = area.removeFromTop(42).reduced(8, 5);
+  dragButton->setBounds(controls.removeFromRight(96));
+  controls.removeFromRight(6);
+  copyButton->setBounds(controls.removeFromRight(154));
   browser->setBounds(area);
 }
 
 void RiffizerMIDIFXAudioProcessorEditor::timerCallback() {
   const auto tempo = ownerProcessor.projectTempo();
   if (tempo <= 1.0) return;
-  dragButton->setButtonText("HOLD + DRAG MIDI  →  LOGIC   ·   " + juce::String(tempo, 1) + " BPM");
   browser->emitEventIfBrowserIsVisible("riffizerHostTempo", tempo);
 }
 
@@ -94,7 +121,6 @@ std::optional<juce::WebBrowserComponent::Resource> RiffizerMIDIFXAudioProcessorE
 }
 
 void RiffizerMIDIFXAudioProcessorEditor::updateDragSettings(const juce::var& payload) {
-  ownerProcessor.setGeneratedIdea(payload);
   dragOptions.multipleTracks = truthy(payload, "multipleTracks", true);
   dragOptions.stringChannels = truthy(payload, "stringChannels", false);
   dragOptions.invertedChannels = truthy(payload, "invertedChannels", false);

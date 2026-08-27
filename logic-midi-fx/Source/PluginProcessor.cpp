@@ -116,6 +116,25 @@ void RiffizerMIDIFXAudioProcessor::setGeneratedIdea(const juce::var& payload) {
   if (const auto* lane = child(*idea, "chordRhythm")) appendLane(*next, *lane, Lane::chordRhythm);
   const std::shared_ptr<const Sequence> frozen = std::move(next);
   std::atomic_store(&sequence, frozen);
+  const juce::ScopedLock lock(payloadLock);
+  latestPayload = payload;
+}
+
+void RiffizerMIDIFXAudioProcessor::clearGeneratedIdea() {
+  const std::shared_ptr<const Sequence> empty = std::make_shared<Sequence>();
+  std::atomic_store(&sequence, empty);
+  const juce::ScopedLock lock(payloadLock);
+  latestPayload = juce::var();
+}
+
+juce::var RiffizerMIDIFXAudioProcessor::generatedPayload() const {
+  const juce::ScopedLock lock(payloadLock);
+  return latestPayload;
+}
+
+juce::String RiffizerMIDIFXAudioProcessor::chordNames() const {
+  const auto current = std::atomic_load(&sequence);
+  return current != nullptr ? current->chords : juce::String{};
 }
 
 int RiffizerMIDIFXAudioProcessor::channelFor(const NoteEvent& event, const ExportOptions& options) {
@@ -185,12 +204,19 @@ void RiffizerMIDIFXAudioProcessor::getStateInformation(juce::MemoryBlock& state)
   const auto current = std::atomic_load(&sequence);
   juce::ValueTree tree("RiffizerMIDIFX");
   if (current != nullptr) { tree.setProperty("tempo", current->tempo, nullptr); tree.setProperty("loopBeats", current->loopBeats, nullptr); tree.setProperty("artist", current->artist, nullptr); tree.setProperty("section", current->section, nullptr); }
+  const auto payload = generatedPayload();
+  if (!payload.isVoid()) tree.setProperty("generatedPayload", juce::JSON::toString(payload, false), nullptr);
   copyXmlToBinary(*tree.createXml(), state);
 }
 
 void RiffizerMIDIFXAudioProcessor::setStateInformation(const void* data, int size) {
   if (const auto xml = getXmlFromBinary(data, size)) {
     const juce::ValueTree tree = juce::ValueTree::fromXml(*xml);
+    const auto payloadText = tree.getProperty("generatedPayload").toString();
+    if (payloadText.isNotEmpty()) {
+      const auto payload = juce::JSON::parse(payloadText);
+      if (!payload.isVoid()) { setGeneratedIdea(payload); return; }
+    }
     auto restored = std::make_shared<Sequence>();
     restored->tempo = static_cast<double>(tree.getProperty("tempo", 120.0)); restored->loopBeats = static_cast<double>(tree.getProperty("loopBeats", 4.0)); restored->artist = tree.getProperty("artist").toString(); restored->section = tree.getProperty("section").toString();
     const std::shared_ptr<const Sequence> frozen = std::move(restored);
