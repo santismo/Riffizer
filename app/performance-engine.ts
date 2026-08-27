@@ -5,7 +5,17 @@ export type PerformanceEvent = { time: number; duration: number; notes: FretNote
 export type TimeSignature = { label: string; beatsPerBar: number };
 export type MeterMap = { meters: TimeSignature[]; starts: number[]; totalBeats: number };
 export type HarmonyEvent = PerformanceEvent & { chord: string; bar: number };
-export type PerformanceIdea = { tempo: number; riffStyle: string; meter: TimeSignature; meterMap: MeterMap; harmony: HarmonyEvent[]; riff: PerformanceEvent[] };
+export type PerformanceIdea = {
+  tempo: number;
+  riffStyle: string;
+  meter: TimeSignature;
+  meterMap: MeterMap;
+  /** Sustained chart voicings used by the normal Harmony switch. */
+  harmony: HarmonyEvent[];
+  /** A separate, profile-shaped chord-stab lane. It never changes the chart. */
+  chordRhythm: HarmonyEvent[];
+  riff: PerformanceEvent[];
+};
 
 type RiffKind = "melodic" | "rock" | "interlock" | "pedal" | "fusion" | "sequence" | "angular";
 type RhythmCell = { id: string; times: number[]; durations: number[]; accents: number[]; cadence?: boolean };
@@ -23,6 +33,7 @@ type PerformanceProfile = { riff: RiffKind; riffLabel: string; tempo: number; po
 type PhraseMotion = "statement" | "answer" | "development" | "arrival";
 type ArtistMotif = { contour: number[]; accentTones: number[]; pickup: number; pedalEvery?: number; meterWeights: Record<string, number> };
 type RiffBarPlan = RhythmCell & { variation: number; phraseMotion: PhraseMotion };
+type ChordRhythmCell = { id: string; hits: number[]; lengths: number[]; accents: number[]; finalHold?: boolean };
 type RiffCursor = { midi: number; gripCenter?: number; anchor?: FretNote; handPosition: number };
 type GripContext = { anchor: FretNote; handPosition: number; previousCenter?: number; previousAnchor?: FretNote; allowOpenPedal: boolean; maxSpan: number; maxShift: number; maxStringTravel: number };
 type TextureState = { singles: number; dyads: number; triads: number; lastSize: 1 | 2 | 3 };
@@ -116,6 +127,47 @@ const rhythmBooks: Record<RiffKind, RhythmCell[]> = {
     { id: "angular-gap", times: [0, 0.5, 1.75, 2.5, 3, 3.75], durations: [0.32, 0.46, 0.32, 0.38, 0.3, 0.18], accents: [0, 3] },
     { id: "angular-lift", times: [0, 0.75, 1, 2.25, 2.5, 3.5], durations: [0.34, 0.2, 0.5, 0.34, 0.26, 0.42], accents: [0, 3] },
     { id: "angular-weave", times: [0, 0.5, 1.25, 2, 3, 3.25], durations: [0.28, 0.4, 0.36, 0.62, 0.2, 0.52], accents: [0, 3, 5] },
+  ],
+};
+
+// The chord lane is intentionally independent from the melodic rhythm book.
+// These are compact accompaniment gestures: the profile determines the kind of
+// pocket, while the generated chart still determines every harmony choice.
+const chordRhythmBooks: Record<RiffKind, ChordRhythmCell[]> = {
+  melodic: [
+    { id: "lyric-pulse", hits: [0, .58], lengths: [.28, .36], accents: [0] },
+    { id: "late-answer", hits: [0, .42, .78], lengths: [.22, .18, .3], accents: [0, 2] },
+    { id: "wide-breath", hits: [0, .7], lengths: [.42, .24], accents: [0], finalHold: true },
+  ],
+  rock: [
+    { id: "rock-stomp", hits: [0, .26, .5, .76], lengths: [.22, .14, .22, .18], accents: [0, 2] },
+    { id: "rock-push", hits: [0, .18, .56, .74], lengths: [.18, .2, .2, .18], accents: [0, 3] },
+    { id: "rock-space", hits: [0, .38, .7], lengths: [.32, .16, .28], accents: [0], finalHold: true },
+  ],
+  interlock: [
+    { id: "interlock-grid", hits: [0, .12, .33, .5, .7, .86], lengths: [.13, .13, .16, .12, .15, .12], accents: [0, 3] },
+    { id: "interlock-skip", hits: [0, .2, .29, .58, .75], lengths: [.16, .11, .15, .14, .18], accents: [0, 3] },
+    { id: "interlock-clave", hits: [0, .16, .46, .63, .88], lengths: [.12, .16, .18, .13, .1], accents: [0, 2] },
+  ],
+  pedal: [
+    { id: "pedal-chop", hits: [0, .14, .5, .66, .82], lengths: [.14, .12, .24, .12, .15], accents: [0, 2] },
+    { id: "pedal-late", hits: [0, .24, .55, .72], lengths: [.18, .15, .22, .18], accents: [0, 2] },
+    { id: "pedal-breathe", hits: [0, .38, .8], lengths: [.3, .17, .16], accents: [0], finalHold: true },
+  ],
+  fusion: [
+    { id: "fusion-pocket", hits: [0, .18, .42, .62, .83], lengths: [.16, .13, .18, .14, .13], accents: [0, 2] },
+    { id: "fusion-anticipate", hits: [0, .3, .48, .74], lengths: [.16, .15, .18, .18], accents: [0, 2] },
+    { id: "fusion-space", hits: [0, .22, .58, .9], lengths: [.22, .1, .24, .08], accents: [0, 2] },
+  ],
+  sequence: [
+    { id: "sequence-march", hits: [0, .25, .5, .75], lengths: [.16, .15, .16, .18], accents: [0, 2] },
+    { id: "sequence-gallop", hits: [0, .12, .31, .5, .62, .81], lengths: [.1, .1, .14, .1, .1, .15], accents: [0, 3] },
+    { id: "sequence-hold", hits: [0, .24, .5], lengths: [.18, .13, .38], accents: [0, 2], finalHold: true },
+  ],
+  angular: [
+    { id: "angular-stab", hits: [0, .17, .4, .66, .78], lengths: [.15, .1, .17, .12, .16], accents: [0, 2] },
+    { id: "angular-gap", hits: [0, .28, .35, .68, .9], lengths: [.18, .1, .14, .15, .08], accents: [0, 3] },
+    { id: "angular-lunge", hits: [0, .13, .52, .73], lengths: [.12, .15, .26, .16], accents: [0, 2] },
   ],
 };
 
@@ -418,12 +470,46 @@ function harmonyForSection(profile: PerformanceProfile, progression: string[], m
   return events.sort((a, b) => a.time - b.time || a.bar - b.bar);
 }
 
+function chordRhythmForSection(profile: PerformanceProfile, progression: string[], meterMap: MeterMap, section: SectionType): HarmonyEvent[] {
+  const cells = chordRhythmBooks[profile.riff];
+  return progression.flatMap((chord, bar) => {
+    const meter = meterMap.meters[bar]; const start = meterMap.starts[bar]; const barBeats = meter.beatsPerBar;
+    const cell = cells[(bar + (section === "Chorus" ? 1 : 0) + Math.floor(Math.random() * cells.length)) % cells.length];
+    return cell.hits.map((fraction, hit) => {
+      const nextFraction = cell.hits[hit + 1] ?? 1;
+      const duration = cell.finalHold && hit === cell.hits.length - 1
+        ? Math.max(.26, barBeats * (1 - fraction) * .86)
+        : Math.min(barBeats * (cell.lengths[hit] ?? .16), Math.max(.12, barBeats * (nextFraction - fraction) - .045));
+      const voicing = createChordPreview(chord, profile.position + ((bar + hit) % 3) - 1);
+      const accented = cell.accents.includes(hit);
+      return {
+        ...voicing,
+        chord,
+        bar,
+        time: start + barBeats * fraction,
+        duration,
+        velocity: accented ? .82 : .6,
+      };
+    });
+  }).sort((a, b) => a.time - b.time || a.bar - b.bar);
+}
+
 export function createPerformanceIdea(artist: Artist, section: SectionType, progression: string[], localCenters: number[], mode: Mode, complexity: number, rhythmComplexity = 2): PerformanceIdea {
   const profile = performanceProfiles[artist]; const meterMap = meterMapFor(profile, artist, progression.length, rhythmComplexity); const plans = makeRiffPlans(profile, artist, progression.length, section, complexity); const cursor: RiffCursor = { midi: 59 + complexity, handPosition: profile.position };
   const riff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, meterMap.starts[bar], meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor));
   const harmony = harmonyForSection(profile, progression, meterMap, rhythmComplexity);
+  const chordRhythm = chordRhythmForSection(profile, progression, meterMap, section);
   const tempoLift = section === "Solo" ? 8 : section === "Chorus" ? 4 : 0;
-  return { tempo: profile.tempo + tempoLift + Math.floor(Math.random() * 7) - 3, riffStyle: profile.riffLabel, meter: meterMap.meters[0], meterMap, harmony, riff };
+  return { tempo: profile.tempo + tempoLift + Math.floor(Math.random() * 7) - 3, riffStyle: profile.riffLabel, meter: meterMap.meters[0], meterMap, harmony, chordRhythm, riff };
+}
+
+/** Makes a fresh lead idea while preserving the exact chart, meter map,
+ * sustained harmony, chord-stab lane, and tempo of the source idea. */
+export function regenerateRiffIdea(artist: Artist, section: SectionType, progression: string[], localCenters: number[], mode: Mode, complexity: number, source: PerformanceIdea): PerformanceIdea {
+  const profile = performanceProfiles[artist]; const plans = makeRiffPlans(profile, artist, progression.length, section, complexity);
+  const cursor: RiffCursor = { midi: 59 + complexity, handPosition: profile.position };
+  const riff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, source.meterMap.starts[bar], source.meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor));
+  return { ...source, riffStyle: profile.riffLabel, riff };
 }
 
 function shapeSignature(event: PerformanceEvent) {
@@ -515,5 +601,13 @@ export function scorePerformanceIdea(artist: Artist, section: SectionType, idea:
     const previousRhythm = rhythmSignature(previous.riff, 0, previous.meterMap.meters[0]?.beatsPerBar ?? 4);
     if (previousRhythm === barRhythms[0]) score -= 2.5;
   }
+
+  const stabs = idea.chordRhythm;
+  const stabBars = new Set(stabs.map((event) => event.bar));
+  score += stabBars.size === idea.meterMap.meters.length ? 5 : -8;
+  score += Math.min(12, stabs.length) * .45;
+  if (stabs.some((event) => !event.notes.length || event.duration < .08)) score -= 20;
+  const stabSignatures = idea.meterMap.meters.map((meter, bar) => rhythmSignature(stabs, idea.meterMap.starts[bar], idea.meterMap.starts[bar] + meter.beatsPerBar));
+  score += new Set(stabSignatures).size > 1 || stabSignatures.length === 1 ? 3 : -2;
   return score;
 }
