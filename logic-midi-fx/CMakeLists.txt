@@ -22,7 +22,7 @@ juce_add_plugin(RiffizerMIDIFX
   PLUGIN_MANUFACTURER_CODE Ojrt
   PLUGIN_CODE Rfmx
   FORMATS AU Standalone
-  PRODUCT_NAME "Riffizer MIDI FX"
+  PRODUCT_NAME "Riffizer"
   IS_MIDI_EFFECT TRUE
   NEEDS_MIDI_INPUT FALSE
   NEEDS_MIDI_OUTPUT TRUE
@@ -33,7 +33,7 @@ juce_add_plugin(RiffizerMIDIFX
 
 # Run scripts/build-ui.sh before configuring CMake. The WebView UI is then
 # embedded into the component, so it works without network access in Logic.
-if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/web/assets/main.js")
+if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/web/index.html" OR NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/web/assets/main.js")
   message(FATAL_ERROR "Missing bundled web UI. Run logic-midi-fx/scripts/build-ui.sh first.")
 endif()
 file(GLOB_RECURSE RIFFIZER_WEB_UI CONFIGURE_DEPENDS Resources/web/*)

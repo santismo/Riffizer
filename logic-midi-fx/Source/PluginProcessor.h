@@ -23,7 +23,7 @@ public:
 
   juce::AudioProcessorEditor* createEditor() override;
   bool hasEditor() const override { return true; }
-  const juce::String getName() const override { return "Riffizer MIDI FX"; }
+  const juce::String getName() const override { return "Riffizer"; }
   bool acceptsMidi() const override { return false; }
   bool producesMidi() const override { return true; }
   bool isMidiEffect() const override { return true; }

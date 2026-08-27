@@ -59,7 +59,7 @@ cmake -S logic-midi-fx -B logic-midi-fx/build -DCMAKE_BUILD_TYPE=Release
 cmake --build logic-midi-fx/build --config Release --target RiffizerMIDIFX_AU
 ```
 
-The component appears at `logic-midi-fx/build/RiffizerMIDIFX_artefacts/Release/AU/Riffizer MIDI FX.component`.
+The component appears at `logic-midi-fx/build/RiffizerMIDIFX_artefacts/Release/AU/Riffizer.component`.
 Install it in `~/Library/Audio/Plug-Ins/Components`, then reopen Logic Pro.
 Logic's Audio Unit MIDI-FX API supports emitted MIDI and MIDI-file export, but
 does not let a plug-in create arrangement regions directly through a drag

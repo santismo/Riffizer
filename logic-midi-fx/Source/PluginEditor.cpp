@@ -35,8 +35,11 @@ void RiffizerMIDIFXAudioProcessorEditor::resized() { browser->setBounds(getLocal
 
 std::optional<juce::WebBrowserComponent::Resource> RiffizerMIDIFXAudioProcessorEditor::webResource(const juce::String& requestedPath) {
   const auto file = requestedPath == "/" || requestedPath.isEmpty() ? "index.html" : requestedPath.fromLastOccurrenceOf("/", false, false);
+  // juce_add_binary_data converts punctuation in resource names to underscores:
+  // `assets/main.js` becomes BinaryData's `main_js`, for example.
+  auto binaryResourceName = file.replaceCharacter('.', '_').replaceCharacter('-', '_');
   int size = 0;
-  if (const auto* data = BinaryData::getNamedResource(file.toRawUTF8(), size)) {
+  if (const auto* data = BinaryData::getNamedResource(binaryResourceName.toRawUTF8(), size)) {
     std::vector<std::byte> bytes(static_cast<size_t>(size));
     std::memcpy(bytes.data(), data, static_cast<size_t>(size));
     return juce::WebBrowserComponent::Resource{ std::move(bytes), mimeFor(file) };
