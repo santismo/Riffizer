@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { artists, createProgression, flatNames, keyLabel, profiles, scoreProgressionCandidate, sharpNames, type Artist, type HarmonicState, type SectionType } from "./harmonic-engine";
 import { completePerformanceIdea, createChordPreview, createPerformanceIdea, regenerateRiffIdea, scorePerformanceIdea, type PerformanceEvent, type PerformanceIdea } from "./performance-engine";
-import { SampleAuditionEngine, type GuitarSampleTone, type SampleInstrument } from "./sample-audition-engine";
+import { prefetchSampleAssets, SampleAuditionEngine, type GuitarSampleTone, type SampleInstrument } from "./sample-audition-engine";
 
 type Part = HarmonicState & { id: number; artist: Artist; section: SectionType; bars: number; progression: string[]; localCenters: number[]; idea: PerformanceIdea };
 type ActiveStep = { key: string; index: number };
@@ -119,6 +119,8 @@ export default function RiffizerClient() {
   const [parts, setParts] = useState<Part[]>([]);
   const [draft, setDraft] = useState<Part | null>(null);
   const [playingKey, setPlayingKey] = useState<string | null>(null);
+  const [loadingKey, setLoadingKey] = useState<string | null>(null);
+  const [auditionErrorKey, setAuditionErrorKey] = useState<string | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [activeBar, setActiveBar] = useState<number | null>(null);
   const [activeTime, setActiveTime] = useState<number | null>(null);
@@ -139,6 +141,8 @@ export default function RiffizerClient() {
   const playingKeyRef = useRef<string | null>(null);
   const tempoOverrides = useRef(new Map<string, number>());
   const nextIdeaId = useRef(1);
+
+  useEffect(() => { void prefetchSampleAssets([guitarToneForArtist(artist), "bass", "drums"]); }, [artist]);
 
   useEffect(() => {
     const current = draft ?? parts.at(-1);
@@ -225,7 +229,7 @@ export default function RiffizerClient() {
     timers.current.forEach((timer) => window.clearTimeout(timer)); timers.current.clear();
     sampleEngine.current?.stopAll();
     playingKeyRef.current = null;
-    setPlayingKey(null); if (clearVisual) clearVisualState(); return version;
+    setPlayingKey(null); setLoadingKey(null); if (clearVisual) clearVisualState(); return version;
   }
 
   function generate() {
@@ -298,19 +302,30 @@ export default function RiffizerClient() {
 
   async function playIdea(part: Part, key: string) {
     if (playingKeyRef.current === key) { stopPlayback(); return; }
-    const version = stopPlayback(false); const context = await audioContextForPlay(); if (!context || version !== transportVersion.current) { if (version === transportVersion.current) clearVisualState(); return; }
+    const version = stopPlayback(false);
+    playingKeyRef.current = key; setPlayingKey(key); setLoadingKey(key); setAuditionErrorKey(null); setFocusKey(key); setActiveStep(null); setActiveTime(null); setActiveBar(null); setSelectedChord(null);
+    const context = await audioContextForPlay();
+    if (!context || version !== transportVersion.current) { if (version === transportVersion.current) { stopPlayback(); setAuditionErrorKey(key); } return; }
     const leadEvents = riffEnabled ? part.idea.riff : [];
     const accompaniment = chordRhythmEnabled ? part.idea.chordRhythm : part.idea.harmony;
     const bassEvents = bassEnabled ? part.idea.bass ?? [] : [];
     const drumEvents = drumsEnabled ? part.idea.drums ?? [] : [];
     const events = [...leadEvents, ...(harmonyEnabled ? accompaniment : []), ...bassEvents, ...drumEvents]; const endBeat = part.idea.meterMap.totalBeats;
-    if (!events.length) { clearVisualState(); return; }
+    if (!events.length) { stopPlayback(); return; }
     const tone = guitarToneForArtist(part.artist); const engine = sampleEngineFor(context);
     const instruments: SampleInstrument[] = [tone];
     if (bassEvents.length) instruments.push("bass");
     if (drumEvents.length) instruments.push("drums");
-    try { await engine.load(instruments); } catch { if (version === transportVersion.current) clearVisualState(); return; }
+    try {
+      await engine.load(instruments);
+      if (context.state !== "running") await context.resume();
+      if (context.state !== "running") throw new Error("Audio context did not resume");
+    } catch {
+      if (version === transportVersion.current) { stopPlayback(); setAuditionErrorKey(key); }
+      return;
+    }
     if (version !== transportVersion.current) return;
+    setLoadingKey(null);
     const cursorEvents = events;
     const cursorTimes = Array.from(new Set([0, ...cursorEvents.flatMap((event) => [event.time, Math.min(endBeat, event.time + event.duration)]), endBeat])).sort((a, b) => a - b);
     const barForTime = (time: number) => part.idea.meterMap.starts.reduce((bar, startAt, index) => time >= startAt ? index : bar, 0);
@@ -327,7 +342,6 @@ export default function RiffizerClient() {
       const nextStart = cycleStart + loopSeconds;
       scheduleTimer(() => scheduleCycle(nextStart), (nextStart - context.currentTime - 0.28) * 1000);
     };
-    playingKeyRef.current = key; setPlayingKey(key); setFocusKey(key); setActiveStep(null); setActiveTime(null); setActiveBar(null); setSelectedChord(null);
     scheduleCycle(context.currentTime + 0.05);
   }
 
@@ -336,7 +350,7 @@ export default function RiffizerClient() {
     const version = stopPlayback(false); setSelectedChord(null); const current = activeStep?.key === key ? activeStep.index : direction > 0 ? -1 : 0; const index = mod(current + direction, events.length); const event = events[index];
     const context = await audioContextForPlay(); if (!context || version !== transportVersion.current) return;
     const engine = sampleEngineFor(context); const instrument: SampleInstrument = fretboardTrack === "bass" ? "bass" : guitarToneForArtist(part.artist);
-    try { await engine.load([instrument]); } catch { return; }
+    try { await engine.load([instrument]); if (context.state !== "running") await context.resume(); } catch { return; }
     if (version !== transportVersion.current) return;
     if (fretboardTrack === "bass") playBassEvent(engine, event, context.currentTime + .03, 60 / part.idea.tempo);
     else playEvent(engine, guitarToneForArtist(part.artist), event, context.currentTime + 0.03, 60 / part.idea.tempo);
@@ -348,7 +362,7 @@ export default function RiffizerClient() {
     const event = chordFingeringFor(part, bar, chordRhythmEnabled); const version = stopPlayback(); setFretboardTrack("chordRhythm"); setSelectedChord({ key, bar, event }); setFocusKey(key); setActiveBar(bar); setActiveStep(null); setActiveTime(null);
     const context = await audioContextForPlay(); if (!context || version !== transportVersion.current) return;
     const tone = guitarToneForArtist(part.artist); const engine = sampleEngineFor(context);
-    try { await engine.load([tone]); } catch { return; }
+    try { await engine.load([tone]); if (context.state !== "running") await context.resume(); } catch { return; }
     if (version !== transportVersion.current) return;
     playEvent(engine, tone, event, context.currentTime + 0.02, 60 / part.idea.tempo, 0.012);
   }
@@ -381,22 +395,22 @@ export default function RiffizerClient() {
     <header className="topbar"><button className="brand" onClick={() => setProfileInfoOpen((open) => !open)} aria-expanded={profileInfoOpen} aria-controls="profile-info"><span className="brand-mark">⌁</span>Riffizer</button>{profileInfoOpen && <div className="profile-popover" id="profile-info" role="status"><p className="eyebrow">Selected profile</p><strong>{profileStyles[artist].label}</strong><p>{profileStyles[artist].description}</p></div>}<span className="topbar-label">chord chart + guitar riff generator</span><button className="new-song" onClick={() => { stopPlayback(); tempoOverrides.current.clear(); setParts([]); setDraft(null); emitJuceEvent("riffizerClearIdea", null); }}>＋ New song</button></header>
     <div className="layout" id="top"><aside className="sidebar" aria-label="Idea controls"><p className="eyebrow">New idea</p><div className="field-stack"><label htmlFor="artist">Style profile</label><select id="artist" value={artist} onChange={(event) => setArtist(event.target.value as Artist)}>{artists.map((name) => <option key={name} value={name}>{profileStyles[name].label}</option>)}</select></div><div className="field-stack"><label htmlFor="section">Part</label><select id="section" value={section} onChange={(event) => setSection(event.target.value as SectionType)}>{sectionTypes.map((type) => <option key={type}>{type}</option>)}</select></div><div className="field-stack"><label htmlFor="format">Format</label><select id="format" value={bars} onChange={(event) => setBars(Number(event.target.value))}>{[4, 8, 12].map((count) => <option key={count} value={count}>{count} bars · chart + riff</option>)}</select></div><div className="field-stack complexity"><label htmlFor="complexity">Complexity <output>{complexity}</output></label><input className="pill-slider" id="complexity" type="range" min="1" max="5" value={complexity} style={pillSliderStyle(complexity, 1, 5, "#e6e6df")} onChange={(event) => setComplexity(Number(event.target.value))} /><div className="complexity-scale"><span>direct</span><span>colorful</span></div></div><div className="field-stack rhythm-complexity"><label htmlFor="rhythm-complexity">Chord timing &amp; meter <output>{["0 · basic", "1 · bars", "2 · offbeat", "3 · split", "4 · meter", "5 · mixed"][rhythmComplexity]}</output></label><input className="pill-slider" id="rhythm-complexity" type="range" min="0" max="5" value={rhythmComplexity} style={pillSliderStyle(rhythmComplexity, 0, 5, "#78baff")} onChange={(event) => setRhythmComplexity(Number(event.target.value))} /><div className="complexity-scale"><span>bar starts</span><span>mixed meters</span></div></div><div className="field-stack modulation"><label htmlFor="modulation">Inside-part modulation <output>{modulation}%</output></label><input className="pill-slider" id="modulation" type="range" min="0" max="100" step="5" value={modulation} style={pillSliderStyle(modulation, 0, 100, "#b1a2ff")} onChange={(event) => setModulation(Number(event.target.value))} /><div className="complexity-scale"><span>stable</span><span>adventurous</span></div></div><div className="generate-row"><button className="generate" onClick={generate}><span>✦</span> Riffize</button><button className="random-settings" onClick={randomizeSettings} aria-label="Randomize settings">⚄</button></div><p className="profile-note"><span style={{ background: profiles[artist].color }} />{profiles[artist].note}</p></aside>
       <section className="workspace" aria-label="Song arrangement"><div className="conversation">
-        {parts.map((part) => { const key = `part-${part.id}`; return <IdeaCard key={key} part={part} isPlaying={playingKey === key} active={focusKey === key ? activeBar : null} activeTime={playingKey === key ? activeTime : null} activeStep={activeStep?.key === key ? activeStep : null} selectedChord={selectedChord?.key === key ? selectedChord : null} harmonyEnabled={harmonyEnabled} chordRhythmEnabled={chordRhythmEnabled} riffEnabled={riffEnabled} bassEnabled={bassEnabled} drumsEnabled={drumsEnabled} fretboardTrack={fretboardTrack} onToggleHarmony={toggleHarmony} onToggleChordRhythm={toggleChordRhythm} onToggleRiff={toggleRiff} onToggleBass={toggleBass} onToggleDrums={toggleDrums} onFretboardTrackChange={(track) => { stopPlayback(); clearVisualState(); setFretboardTrack(track); }} onPlay={() => { void playIdea(part, key); }} onStep={(direction) => { void stepIdea(part, key, direction); }} onAuditionChord={(bar) => { void auditionChord(part, key, bar); }} onTempoChange={(tempo) => changeTempo(part, key, tempo)} onCopy={() => { void copyChordNames(part, key); }} copied={copiedKey === key} onRemove={() => removePart(part.id)} />; })}
-        {draft && <article className="draft-card"><div className="draft-body"><IdeaCard part={draft} isPlaying={playingKey === "draft"} active={focusKey === "draft" ? activeBar : null} activeTime={playingKey === "draft" ? activeTime : null} activeStep={activeStep?.key === "draft" ? activeStep : null} selectedChord={selectedChord?.key === "draft" ? selectedChord : null} harmonyEnabled={harmonyEnabled} chordRhythmEnabled={chordRhythmEnabled} riffEnabled={riffEnabled} bassEnabled={bassEnabled} drumsEnabled={drumsEnabled} fretboardTrack={fretboardTrack} onToggleHarmony={toggleHarmony} onToggleChordRhythm={toggleChordRhythm} onToggleRiff={toggleRiff} onToggleBass={toggleBass} onToggleDrums={toggleDrums} onFretboardTrackChange={(track) => { stopPlayback(); clearVisualState(); setFretboardTrack(track); }} onPlay={() => { void playIdea(draft, "draft"); }} onStep={(direction) => { void stepIdea(draft, "draft", direction); }} onAuditionChord={(bar) => { void auditionChord(draft, "draft", bar); }} onTempoChange={(tempo) => changeTempo(draft, "draft", tempo)} onCopy={() => { void copyChordNames(draft, "draft"); }} copied={copiedKey === "draft"} /><div className="draft-actions"><button className="quiet-button" onClick={regenerateRiff}>↻ Regenerate riff</button><button className="add-button" onClick={addDraft}>Add to song →</button></div></div></article>}
+        {parts.map((part) => { const key = `part-${part.id}`; return <IdeaCard key={key} part={part} isPlaying={playingKey === key} isLoading={loadingKey === key} auditionError={auditionErrorKey === key} active={focusKey === key ? activeBar : null} activeTime={playingKey === key ? activeTime : null} activeStep={activeStep?.key === key ? activeStep : null} selectedChord={selectedChord?.key === key ? selectedChord : null} harmonyEnabled={harmonyEnabled} chordRhythmEnabled={chordRhythmEnabled} riffEnabled={riffEnabled} bassEnabled={bassEnabled} drumsEnabled={drumsEnabled} fretboardTrack={fretboardTrack} onToggleHarmony={toggleHarmony} onToggleChordRhythm={toggleChordRhythm} onToggleRiff={toggleRiff} onToggleBass={toggleBass} onToggleDrums={toggleDrums} onFretboardTrackChange={(track) => { stopPlayback(); clearVisualState(); setFretboardTrack(track); }} onPlay={() => { void playIdea(part, key); }} onStep={(direction) => { void stepIdea(part, key, direction); }} onAuditionChord={(bar) => { void auditionChord(part, key, bar); }} onTempoChange={(tempo) => changeTempo(part, key, tempo)} onCopy={() => { void copyChordNames(part, key); }} copied={copiedKey === key} onRemove={() => removePart(part.id)} />; })}
+        {draft && <article className="draft-card"><div className="draft-body"><IdeaCard part={draft} isPlaying={playingKey === "draft"} isLoading={loadingKey === "draft"} auditionError={auditionErrorKey === "draft"} active={focusKey === "draft" ? activeBar : null} activeTime={playingKey === "draft" ? activeTime : null} activeStep={activeStep?.key === "draft" ? activeStep : null} selectedChord={selectedChord?.key === "draft" ? selectedChord : null} harmonyEnabled={harmonyEnabled} chordRhythmEnabled={chordRhythmEnabled} riffEnabled={riffEnabled} bassEnabled={bassEnabled} drumsEnabled={drumsEnabled} fretboardTrack={fretboardTrack} onToggleHarmony={toggleHarmony} onToggleChordRhythm={toggleChordRhythm} onToggleRiff={toggleRiff} onToggleBass={toggleBass} onToggleDrums={toggleDrums} onFretboardTrackChange={(track) => { stopPlayback(); clearVisualState(); setFretboardTrack(track); }} onPlay={() => { void playIdea(draft, "draft"); }} onStep={(direction) => { void stepIdea(draft, "draft", direction); }} onAuditionChord={(bar) => { void auditionChord(draft, "draft", bar); }} onTempoChange={(tempo) => changeTempo(draft, "draft", tempo)} onCopy={() => { void copyChordNames(draft, "draft"); }} copied={copiedKey === "draft"} /><div className="draft-actions"><button className="quiet-button" onClick={regenerateRiff}>↻ Regenerate riff</button><button className="add-button" onClick={addDraft}>Add to song →</button></div></div></article>}
       </div></section>
     </div>
   </main>;
 }
 
 type IdeaCardProps = {
-  part: Part; isPlaying: boolean; active: number | null; activeTime: number | null; activeStep: ActiveStep | null; selectedChord: SelectedChord | null;
+  part: Part; isPlaying: boolean; isLoading: boolean; auditionError: boolean; active: number | null; activeTime: number | null; activeStep: ActiveStep | null; selectedChord: SelectedChord | null;
   harmonyEnabled: boolean; chordRhythmEnabled: boolean; riffEnabled: boolean; bassEnabled: boolean; drumsEnabled: boolean; fretboardTrack: FretboardTrack;
   onToggleHarmony: () => void; onToggleChordRhythm: () => void; onToggleRiff: () => void; onToggleBass: () => void; onToggleDrums: () => void;
   onFretboardTrackChange: (track: FretboardTrack) => void; onPlay: () => void; onStep: (direction: number) => void; onRemove?: () => void;
   onAuditionChord: (bar: number) => void; onTempoChange: (tempo: number) => void; onCopy: () => void; copied: boolean;
 };
 
-function IdeaCard({ part, isPlaying, active, activeTime, activeStep, selectedChord, harmonyEnabled, chordRhythmEnabled, riffEnabled, bassEnabled, drumsEnabled, fretboardTrack, onToggleHarmony, onToggleChordRhythm, onToggleRiff, onToggleBass, onToggleDrums, onFretboardTrackChange, onPlay, onStep, onRemove, onAuditionChord, onTempoChange, onCopy, copied }: IdeaCardProps) {
+function IdeaCard({ part, isPlaying, isLoading, auditionError, active, activeTime, activeStep, selectedChord, harmonyEnabled, chordRhythmEnabled, riffEnabled, bassEnabled, drumsEnabled, fretboardTrack, onToggleHarmony, onToggleChordRhythm, onToggleRiff, onToggleBass, onToggleDrums, onFretboardTrackChange, onPlay, onStep, onRemove, onAuditionChord, onTempoChange, onCopy, copied }: IdeaCardProps) {
   const path = harmonicPath(part);
   const pluginHost = Boolean(juceBackend());
   const [exportOptions, setExportOptions] = useState({ multipleTracks: true, stringChannels: false, invertedChannels: false });
@@ -413,7 +427,7 @@ function IdeaCard({ part, isPlaying, active, activeTime, activeStep, selectedCho
     <div className="chord-chart" aria-label={`Chord chart in ${meterLabel}`}>{part.progression.map((chord, bar) => <button className={active === bar ? "chart-chord active" : "chart-chord"} key={`${chord}-${bar}`} onClick={() => onAuditionChord(bar)} aria-label={`Play ${chord} and show its guitar shape`} aria-pressed={selectedChord?.bar === bar}>{chord}</button>)}</div>
     <div className="idea-controls">
       <div className="transport-controls">
-        <button className={`play-idea ${isPlaying ? "is-playing" : ""}`} onClick={onPlay} aria-label={isPlaying ? "Stop loop" : "Loop generated idea"}><span className={`transport-icon ${isPlaying ? "stop" : "play"}`} aria-hidden="true" /></button>
+        <button className={`play-idea ${isPlaying ? "is-playing" : ""} ${isLoading ? "is-loading" : ""}`} onClick={onPlay} aria-label={isLoading ? "Loading audition samples" : isPlaying ? "Stop loop" : "Loop generated idea"}><span className={`transport-icon ${isLoading ? "loading" : isPlaying ? "stop" : "play"}`} aria-hidden="true" /></button>
         <button className={`harmony-toggle ${harmonyEnabled ? "is-on" : ""}`} onClick={onToggleHarmony} aria-pressed={harmonyEnabled}>{harmonyEnabled ? "♬ Harmony on" : "♬ Harmony muted"}</button>
         <button className={`chord-rhythm-toggle ${chordRhythmEnabled ? "is-on" : ""}`} onClick={onToggleChordRhythm} aria-pressed={chordRhythmEnabled}>{chordRhythmEnabled ? "Chord rhythm on" : "Chord rhythm off"}</button>
         <button className={`riff-toggle ${riffEnabled ? "is-on" : ""}`} onClick={onToggleRiff} aria-pressed={riffEnabled}>{riffEnabled ? "Riff on" : "Riff muted"}</button>
@@ -423,7 +437,7 @@ function IdeaCard({ part, isPlaying, active, activeTime, activeStep, selectedCho
       </div>
       <div className="track-view-row"><label className="track-view-selector"><span>Fretboard track</span><select value={fretboardTrack} onChange={(event) => onFretboardTrackChange(event.target.value as FretboardTrack)} aria-label="Choose the track shown on the fretboard"><option value="riff">Riff / melody</option><option value="chordRhythm">Chord rhythm</option><option value="bass">Bass line</option></select></label></div>
       {pluginHost && <div className="plugin-export-options" aria-label="Logic MIDI export options"><button className="midi-button" onClick={() => setExportOptions((current) => ({ ...current, multipleTracks: !current.multipleTracks }))}>{exportOptions.multipleTracks ? "5 tracks" : "Single track"}</button><button className={`midi-button ${exportOptions.stringChannels ? "is-selected" : ""}`} onClick={() => setExportOptions((current) => ({ ...current, stringChannels: !current.stringChannels }))}>Strings → channels</button><button className={`midi-button ${exportOptions.invertedChannels ? "is-selected" : ""}`} onClick={() => setExportOptions((current) => ({ ...current, invertedChannels: !current.invertedChannels }))}>Ch invert</button></div>}
-      <p className="idea-mode-note">{pluginHost ? "The play button auditions every enabled lane with built-in samples. Logic transport sends the selected guitar parts only; Drag MIDI still exports riff, chords, chord rhythm, bass, and drums. " : "Sample playback follows the lane switches; MIDI exports five separate tracks. "}Fretboard: {modeLabel}</p>
+      <p className={`idea-mode-note ${auditionError ? "audition-error" : ""}`}>{isLoading ? "Loading audition samples… " : auditionError ? "Samples did not load; press Play to retry. " : pluginHost ? "The play button auditions every enabled lane with built-in samples. Logic transport sends the selected guitar parts only; Drag MIDI still exports riff, chords, chord rhythm, bass, and drums. " : "Sample playback follows the lane switches; MIDI exports five separate tracks. "}Fretboard: {modeLabel}</p>
       <label className="tempo-control"><span>{pluginHost ? "Project tempo" : "Tempo"}</span><input className="pill-slider" type="range" min="70" max="190" value={part.idea.tempo} style={pillSliderStyle(part.idea.tempo, 70, 190, "#e6e6df")} onChange={(event) => onTempoChange(Number(event.target.value))} aria-label={`${part.section} tempo`} disabled={pluginHost} /><output>{part.idea.tempo}</output></label>
     </div>
     <div className="riff-navigator" aria-label={`${modeLabel} note navigator`}><button className="fret-nav previous" onClick={() => onStep(-1)} aria-label={`Previous ${modeLabel.toLowerCase()} event`}>‹</button><div className="riff-fret-stage"><RiffTimeline events={events} activeBar={active} activeIndex={activeIndex} meterMap={part.idea.meterMap} /><Fretboard events={events} activeTime={activeTime} activeStep={activeStep} chordPreview={fretboardTrack === "chordRhythm" ? selectedChord?.event : undefined} isPlaying={isPlaying} label={modeLabel} instrument={fretboardTrack === "bass" ? "bass" : "guitar"} /></div><button className="fret-nav next" onClick={() => onStep(1)} aria-label={`Next ${modeLabel.toLowerCase()} event`}>›</button></div>

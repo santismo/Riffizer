@@ -39,8 +39,41 @@ const drumSamples: Record<number, string> = {
   49: "drum-crash.wav",
 };
 
+const sampleBytes = new Map<string, ArrayBuffer>();
+const sampleByteLoads = new Map<string, Promise<ArrayBuffer>>();
+
 function sampleUrl(file: string) {
   return new URL(`samples/${file}`, document.baseURI).toString();
+}
+
+function fetchSampleBytes(file: string) {
+  const ready = sampleBytes.get(file);
+  if (ready) return Promise.resolve(ready);
+  const existing = sampleByteLoads.get(file);
+  if (existing) return existing;
+  const pending = fetch(sampleUrl(file), { cache: "force-cache" })
+    .then((response) => {
+      if (!response.ok) throw new Error(`Could not load ${file} (${response.status})`);
+      return response.arrayBuffer();
+    })
+    .then((data) => {
+      sampleBytes.set(file, data);
+      return data;
+    })
+    .finally(() => sampleByteLoads.delete(file));
+  sampleByteLoads.set(file, pending);
+  return pending;
+}
+
+function filesFor(instrument: SampleInstrument) {
+  return instrument === "drums" ? Object.values(drumSamples) : pitchedSamples[instrument].map((sample) => sample.file);
+}
+
+/** Starts fetching sample bytes before the first play gesture. Audio decoding
+ * still happens in the user-created AudioContext. Failed files remain retryable. */
+export async function prefetchSampleAssets(instruments: SampleInstrument[]) {
+  const files = new Set(instruments.flatMap(filesFor));
+  await Promise.allSettled(Array.from(files, fetchSampleBytes));
 }
 
 function nearestSample(samples: LoadedSample[], midi: number) {
@@ -70,29 +103,24 @@ export class SampleAuditionEngine {
     if (ready) return Promise.resolve(ready);
     let pending = this.loading.get(file);
     if (!pending) {
-      pending = fetch(sampleUrl(file), { cache: "force-cache" })
-        .then((response) => {
-          if (!response.ok) throw new Error(`Could not load ${file} (${response.status})`);
-          return response.arrayBuffer();
-        })
+      pending = fetchSampleBytes(file)
         .then((data) => decodeAudio(this.context, data))
         .then((buffer) => {
           this.loaded.set(file, buffer);
-          this.loading.delete(file);
           return buffer;
-        });
+        })
+        .finally(() => this.loading.delete(file));
       this.loading.set(file, pending);
     }
     return pending;
   }
 
   async load(instruments: SampleInstrument[]) {
-    const files = new Set<string>();
-    instruments.forEach((instrument) => {
-      if (instrument === "drums") Object.values(drumSamples).forEach((file) => files.add(file));
-      else pitchedSamples[instrument].forEach((sample) => files.add(sample.file));
-    });
-    await Promise.all(Array.from(files, (file) => this.loadFile(file)));
+    await Promise.all(Array.from(new Set(instruments), async (instrument) => {
+      const files = filesFor(instrument);
+      await Promise.allSettled(files.map((file) => this.loadFile(file)));
+      if (!files.some((file) => this.loaded.has(file))) throw new Error(`No ${instrument} samples could be decoded`);
+    }));
   }
 
   playPitched(instrument: Exclude<SampleInstrument, "drums">, midi: number, time: number, duration: number, velocity: number, level = 1) {

@@ -80,6 +80,9 @@ option { background: #252525; }
 .transport-icon { display: block; }
 .transport-icon.play { width: 0; height: 0; margin-left: 2px; border-top: 7px solid transparent; border-bottom: 7px solid transparent; border-left: 11px solid #efefea; }
 .transport-icon.stop { width: 12px; height: 12px; background: #efefea; border-radius: 1px; }
+.transport-icon.loading { width: 14px; height: 14px; border: 2px solid #5d625f; border-top-color: #efefea; border-radius: 50%; animation: audition-spin .72s linear infinite; }
+.idea-mode-note.audition-error { color: #e8b3a9; }
+@keyframes audition-spin { to { transform: rotate(360deg); } }
 .midi-button { padding: 0 9px; color: #c8c8c1; }
 .chord-copy.is-copied { border-color: #87caa5; color: #e0ffeb; background: #1d3527; }
 .midi-button.is-selected { border-color: #b99763; color: #fff0d7; background: #392b1c; }

@@ -414,10 +414,12 @@ function riffForBar(profile: PerformanceProfile, artist: Artist, section: Sectio
 }
 
 function chordVoicingPlans(artist?: Artist) {
-  if (artist === "CHON" || artist === "Owane") return [[3, 1, 0], [3, 2, 1], [1, 3, 0], [2, 3, 1], [3, 2, 1, 0], [0, 3, 1]];
-  if (artist === "Guthrie Govan" || artist === "Greg Howe") return [[3, 1, 0], [1, 3, 0], [3, 2, 0], [2, 3, 1], [3, 2, 1, 0], [0, 3, 2]];
-  if (artist === "Yngwie Malmsteen" || artist === "Moray Pringle") return [[3, 2, 0], [3, 1, 0], [2, 3, 0], [3, 2, 1, 0], [0, 3, 2], [1, 3, 0]];
-  return [[3, 2, 1, 0], [3, 1, 0], [3, 2, 0], [1, 3, 0], [2, 3, 1], [0, 3, 1]];
+  const originalPlans = [[3, 2, 1, 0], [3, 2, 0], [3, 1, 0], [3, 2, 1]];
+  const styledPlans = artist === "CHON" || artist === "Owane" ? [[1, 3, 0], [2, 3, 1], [0, 3, 1]]
+    : artist === "Guthrie Govan" || artist === "Greg Howe" ? [[1, 3, 0], [2, 3, 1], [0, 3, 2]]
+    : artist === "Yngwie Malmsteen" || artist === "Moray Pringle" ? [[2, 3, 0], [0, 3, 2], [1, 3, 0]]
+    : [[1, 3, 0], [2, 3, 1], [0, 3, 1]];
+  return [...originalPlans, ...styledPlans];
 }
 
 /** Builds a color-preserving voicing from physically playable, contiguous
@@ -445,7 +447,7 @@ export function createChordPreview(chord: string, position = 5, artist?: Artist,
     const score = grip.score + planIndex * .22 + (colorPresent ? 0 : 40) + (grip.notes.length === 4 ? (compact ? 8 : -.5) : 0);
     return [{ ...grip, score }];
   }).sort((a, b) => a.score - b.score);
-  const pool = candidates.slice(0, Math.min(3, candidates.length));
+  const pool = candidates.slice(0, Math.min(5, candidates.length));
   const chosen = pool[mod(variant + chord.split("").reduce((sum, letter) => sum + letter.charCodeAt(0), 0), Math.max(1, pool.length))];
   if (chosen) return { time: 0, duration: 0.92, notes: chosen.notes, velocity: 0.75 };
   const color = tones[3]; const anchor = locateLeadPc(color, 67, position + 1);
@@ -565,6 +567,7 @@ function chordRhythmForSection(profile: PerformanceProfile, artist: Artist, prog
     const missingAccent = accentFractions.find((fraction) => fraction > .04 && hitPlan.every((hit) => Math.abs(hit.fraction - fraction) > snapWindow));
     if (missingAccent !== undefined && hitPlan.length < (profile.riff === "melodic" ? 3 : 6)) hitPlan.push({ fraction: missingAccent, originalHit: -1, forcedAccent: true });
     const uniqueHits = Array.from(new Map(hitPlan.sort((a, b) => a.fraction - b.fraction).map((hit) => [Math.round(hit.fraction * 64), hit])).values());
+    const voicing = createChordPreview(chord, profile.position + (bar % 3) - 1, artist, bar * 7, true);
     return uniqueHits.map((planned, hit) => {
       const fraction = planned.fraction;
       const nextFraction = uniqueHits[hit + 1]?.fraction ?? 1;
@@ -576,7 +579,6 @@ function chordRhythmForSection(profile: PerformanceProfile, artist: Artist, prog
         : Math.min(barBeats * (cell.lengths[Math.max(0, planned.originalHit)] ?? .16), Math.max(.12, barBeats * (nextFraction - fraction) - .045));
       const nextRiff = barRiff.find((event) => event.time > time + .09);
       if (inSpace && nextRiff) duration = Math.min(duration, Math.max(.12, nextRiff.time - time - .045));
-      const voicing = createChordPreview(chord, profile.position + (bar % 3) - 1, artist, bar * 7 + hit, true);
       const accented = planned.forcedAccent || cell.accents.includes(planned.originalHit);
       return {
         ...voicing,
@@ -678,7 +680,16 @@ export function completePerformanceIdea(artist: Artist, section: SectionType, pr
   const legacy = source as PerformanceIdea & { bass?: HarmonyEvent[]; drums?: PerformanceEvent[]; chordRhythm?: HarmonyEvent[] };
   const harmony = source.harmony.map((event, index) => ({ ...event, notes: createChordPreview(event.chord, profile.position + (event.bar % 2), artist, index).notes }));
   const savedChordRhythm = legacy.chordRhythm?.length ? legacy.chordRhythm : chordRhythmForSection(profile, artist, progression, source.meterMap, section, source.riff);
-  const chordRhythm = savedChordRhythm.map((event, index) => ({ ...event, notes: createChordPreview(event.chord, profile.position + (event.bar % 3) - 1, artist, event.bar * 7 + index, true).notes }));
+  const restoredVoicings = new Map<string, FretNote[]>();
+  const chordRhythm = savedChordRhythm.map((event) => {
+    const key = `${event.bar}:${event.chord}`;
+    let notes = restoredVoicings.get(key);
+    if (!notes) {
+      notes = createChordPreview(event.chord, profile.position + (event.bar % 3) - 1, artist, event.bar * 7, true).notes;
+      restoredVoicings.set(key, notes);
+    }
+    return { ...event, notes };
+  });
   const bass = legacy.bass?.length ? legacy.bass : bassForSection(profile, progression, source.meterMap, chordRhythm, source.riff, complexity);
   const drums = legacy.drums?.length ? legacy.drums : drumTrackForSection(profile, section, source.meterMap, chordRhythm, source.riff, rhythmComplexity);
   return { ...source, harmony, chordRhythm, bass, drums };
