@@ -48,10 +48,12 @@ produce the Pages artifact in `dist/client`.
 
 `logic-midi-fx/` builds an Apple Audio Unit MIDI Processor with the same
 Riffizer UI and generator. It outputs generated MIDI while Logic's transport
-runs. In the plug-in, **Drag MIDI → Logic** starts a native file drag with no
-save dialog: **Multi tracks** carries named riff, chord-chart, and chord-rhythm
-lanes; **Single track** merges them. Its export controls can route guitar
-strings to MIDI channels 1–6, with optional channel inversion.
+runs, with the existing **Riff**, **Harmony**, and **Chord rhythm** controls
+selecting the live MIDI lanes. In the plug-in, the native **HOLD + DRAG MIDI →
+LOGIC** bar starts a file drag with no save dialog: **Multi tracks** carries
+named riff, chord-chart, and chord-rhythm lanes; **Single track** merges them.
+Its export controls can route guitar strings to MIDI channels 1–6, with
+optional channel inversion.
 
 ```sh
 npm ci

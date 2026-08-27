@@ -10,6 +10,11 @@ const juce::var* child(const juce::var& value, const juce::Identifier& key) {
 double number(const juce::var& value, double fallback = 0.0) {
   return value.isDouble() || value.isInt() || value.isInt64() ? static_cast<double>(value) : fallback;
 }
+
+bool enabled(const juce::var& value, const juce::Identifier& key, bool fallback) {
+  if (const auto* object = value.getDynamicObject()) return object->hasProperty(key) ? static_cast<bool>(object->getProperty(key)) : fallback;
+  return fallback;
+}
 }
 
 RiffizerMIDIFXAudioProcessor::RiffizerMIDIFXAudioProcessor()
@@ -44,6 +49,10 @@ void RiffizerMIDIFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer
   for (int loop = firstLoop; loop <= lastLoop; ++loop) {
     const auto loopStart = static_cast<double>(loop) * current->loopBeats;
     for (const auto& event : current->notes) {
+      const auto sendsLane = event.lane == Lane::riff ? current->riffEnabled
+        : event.lane == Lane::harmony ? current->harmonyEnabled && !current->chordRhythmEnabled
+        : current->harmonyEnabled && current->chordRhythmEnabled;
+      if (!sendsLane) continue;
       const auto noteOn = loopStart + event.beat;
       const auto noteOff = noteOn + event.duration;
       const auto sampleAt = [&] (double beat) { return juce::jlimit(0, buffer.getNumSamples() - 1, juce::roundToInt((beat - startBeat) * 60.0 * currentSampleRate / tempo)); };
@@ -84,6 +93,11 @@ void RiffizerMIDIFXAudioProcessor::setGeneratedIdea(const juce::var& payload) {
   if (const auto* artist = child(*part, "artist")) next->artist = artist->toString();
   if (const auto* section = child(*part, "section")) next->section = section->toString();
   if (const auto* meterMap = child(*idea, "meterMap")) if (const auto* total = child(*meterMap, "totalBeats")) next->loopBeats = juce::jmax(1.0, number(*total, 4.0));
+  if (const auto* settings = child(payload, "settings")) {
+    next->riffEnabled = enabled(*settings, "riffEnabled", true);
+    next->harmonyEnabled = enabled(*settings, "harmonyEnabled", true);
+    next->chordRhythmEnabled = enabled(*settings, "chordRhythmEnabled", false);
+  }
   if (const auto* lane = child(*idea, "riff")) appendLane(*next, *lane, Lane::riff);
   if (const auto* lane = child(*idea, "harmony")) appendLane(*next, *lane, Lane::harmony);
   if (const auto* lane = child(*idea, "chordRhythm")) appendLane(*next, *lane, Lane::chordRhythm);

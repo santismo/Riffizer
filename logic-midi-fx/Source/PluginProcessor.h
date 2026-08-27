@@ -43,7 +43,12 @@ public:
 private:
   enum class Lane { riff, harmony, chordRhythm };
   struct NoteEvent { double beat = 0.0, duration = .25; int midi = 60, guitarString = 0; float velocity = .8f; Lane lane = Lane::riff; };
-  struct Sequence { std::vector<NoteEvent> notes; double loopBeats = 4.0, tempo = 120.0; juce::String artist, section; };
+  struct Sequence {
+    std::vector<NoteEvent> notes;
+    double loopBeats = 4.0, tempo = 120.0;
+    juce::String artist, section;
+    bool riffEnabled = true, harmonyEnabled = true, chordRhythmEnabled = false;
+  };
 
   static int channelFor(const NoteEvent&, const ExportOptions&);
   static void appendLane(Sequence&, const juce::var&, Lane);
