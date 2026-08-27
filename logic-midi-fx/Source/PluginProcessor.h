@@ -37,6 +37,7 @@ public:
   void setStateInformation(const void*, int) override;
 
   void setGeneratedIdea(const juce::var& payload);
+  double projectTempo() const noexcept { return currentProjectTempo.load(std::memory_order_relaxed); }
   juce::File createDragMidiFile(const ExportOptions&) const;
   bool writeMidiFile(const juce::File&, const ExportOptions&) const;
 
@@ -46,16 +47,17 @@ private:
   struct Sequence {
     std::vector<NoteEvent> notes;
     double loopBeats = 4.0, tempo = 120.0;
-    juce::String artist, section;
+    juce::String artist, section, style, chords;
     bool riffEnabled = true, harmonyEnabled = true, chordRhythmEnabled = false;
   };
 
   static int channelFor(const NoteEvent&, const ExportOptions&);
   static void appendLane(Sequence&, const juce::var&, Lane);
-  static void addMidiTrack(juce::MidiFile&, const Sequence&, Lane, const juce::String&, const ExportOptions&);
-  static void addMergedTrack(juce::MidiFile&, const Sequence&, const juce::String&, const ExportOptions&);
+  static void addMidiTrack(juce::MidiFile&, const Sequence&, Lane, const juce::String&, double, const ExportOptions&);
+  static void addMergedTrack(juce::MidiFile&, const Sequence&, const juce::String&, double, const ExportOptions&);
   std::shared_ptr<const Sequence> sequence;
   double currentSampleRate = 44100.0;
+  std::atomic<double> currentProjectTempo { 0.0 };
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RiffizerMIDIFXAudioProcessor)
 };

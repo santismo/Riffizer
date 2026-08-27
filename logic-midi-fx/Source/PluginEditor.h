@@ -4,7 +4,7 @@
 
 class RiffizerMidiDragButton;
 
-class RiffizerMIDIFXAudioProcessorEditor final : public juce::AudioProcessorEditor {
+class RiffizerMIDIFXAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer {
 public:
   explicit RiffizerMIDIFXAudioProcessorEditor(RiffizerMIDIFXAudioProcessor&);
   ~RiffizerMIDIFXAudioProcessorEditor() override;
@@ -13,6 +13,7 @@ public:
 private:
   void updateDragSettings(const juce::var&);
   void beginMidiDrag();
+  void timerCallback() override;
   static std::optional<juce::WebBrowserComponent::Resource> webResource(const juce::String&);
   RiffizerMIDIFXAudioProcessor& ownerProcessor;
   std::unique_ptr<juce::WebBrowserComponent> browser;

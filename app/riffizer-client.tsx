@@ -23,7 +23,12 @@ const profileStyles: Record<Artist, { label: string; description: string }> = {
 const choose = <T,>(items: readonly T[]) => items[Math.floor(Math.random() * items.length)];
 const mod = (value: number, divisor: number) => ((value % divisor) + divisor) % divisor;
 
-type JuceBridge = { backend?: { emitEvent?: (eventId: string, payload: unknown) => void } };
+type JuceListenerToken = [string, number];
+type JuceBridge = { backend?: {
+  emitEvent?: (eventId: string, payload: unknown) => void;
+  addEventListener?: (eventId: string, listener: (payload: unknown) => void) => JuceListenerToken;
+  removeEventListener?: (token: JuceListenerToken) => void;
+} };
 function juceBackend() {
   if (typeof window === "undefined") return undefined;
   return (window as typeof window & { __JUCE__?: JuceBridge }).__JUCE__?.backend;
@@ -69,15 +74,17 @@ function midiTrack(events: PerformanceEvent[], name: string, tempo: number, mete
 }
 
 function downloadMidi(part: Part) {
+  const style = profileStyles[part.artist].label;
+  const chords = part.progression.join(", ");
   const header = [...Array.from(new TextEncoder().encode("MThd")), 0, 0, 0, 6, 0, 1, 0, 3, 0, 96];
   const bytes = new Uint8Array([
     ...header,
-    ...midiTrack(part.idea.riff, `${part.section} · ${part.artist} riff`, part.idea.tempo, part.idea.meterMap),
-    ...midiTrack(part.idea.harmony, `${part.section} · chord chart`, part.idea.tempo, part.idea.meterMap),
-    ...midiTrack(part.idea.chordRhythm, `${part.section} · ${part.artist} chord rhythm`, part.idea.tempo, part.idea.meterMap),
+    ...midiTrack(part.idea.riff, `${style} · riff · ${chords}`, part.idea.tempo, part.idea.meterMap),
+    ...midiTrack(part.idea.harmony, `${style} · chords · ${chords}`, part.idea.tempo, part.idea.meterMap),
+    ...midiTrack(part.idea.chordRhythm, `${style} · chord rhythm · ${chords}`, part.idea.tempo, part.idea.meterMap),
   ]);
   const url = URL.createObjectURL(new Blob([bytes], { type: "audio/midi" })); const link = document.createElement("a");
-  link.href = url; link.download = `${part.artist.replaceAll(" ", "-").toLowerCase()}-${part.section.toLowerCase()}-riff.mid`; link.click(); URL.revokeObjectURL(url);
+  link.href = url; link.download = `${style.replaceAll(" ", "-").toLowerCase()}-${part.progression.join("-").replaceAll("/", "-")}.mid`; link.click(); URL.revokeObjectURL(url);
 }
 
 export default function RiffizerClient() {
@@ -110,8 +117,30 @@ export default function RiffizerClient() {
 
   useEffect(() => {
     const current = draft ?? parts.at(-1);
-    if (current) emitJuceEvent("riffizerIdea", { part: current, settings: { harmonyEnabled, chordRhythmEnabled, riffEnabled } });
+    if (current) emitJuceEvent("riffizerIdea", { part: current, style: profileStyles[current.artist].label, settings: { harmonyEnabled, chordRhythmEnabled, riffEnabled } });
   }, [draft, parts, harmonyEnabled, chordRhythmEnabled, riffEnabled]);
+
+  useEffect(() => {
+    const backend = juceBackend();
+    if (!backend?.addEventListener) return;
+    const token = backend.addEventListener("riffizerHostTempo", (payload) => {
+      const value = typeof payload === "number" ? payload : Number(payload);
+      if (!Number.isFinite(value) || value < 20 || value > 400) return;
+      const tempo = Math.round(value);
+      tempoOverrides.current.clear();
+      setDraft((current) => current && current.idea.tempo !== tempo ? { ...current, idea: { ...current.idea, tempo } } : current);
+      setParts((current) => {
+        let changed = false;
+        const next = current.map((part) => {
+          if (part.idea.tempo === tempo) return part;
+          changed = true;
+          return { ...part, idea: { ...part.idea, tempo } };
+        });
+        return changed ? next : current;
+      });
+    });
+    return () => backend.removeEventListener?.(token);
+  }, []);
 
   useEffect(() => () => {
     transportVersion.current += 1;
@@ -273,11 +302,10 @@ function IdeaCard({ part, isPlaying, active, activeTime, activeStep, selectedCho
   const pluginHost = Boolean(juceBackend());
   const [exportOptions, setExportOptions] = useState({ multipleTracks: true, stringChannels: false, invertedChannels: false });
   useEffect(() => {
-    if (pluginHost) emitJuceEvent("riffizerDragSettings", { part, ...exportOptions, settings: { harmonyEnabled, chordRhythmEnabled, riffEnabled } });
+    if (pluginHost) emitJuceEvent("riffizerDragSettings", { part, style: profileStyles[part.artist].label, ...exportOptions, settings: { harmonyEnabled, chordRhythmEnabled, riffEnabled } });
   }, [pluginHost, part, exportOptions, harmonyEnabled, chordRhythmEnabled, riffEnabled]);
   const exportIdea = () => {
-    if (pluginHost) emitJuceEvent("riffizerDragSettings", { part, ...exportOptions, settings: { harmonyEnabled, chordRhythmEnabled, riffEnabled } });
-    else downloadMidi(part);
+    downloadMidi(part);
   };
   const displayChordRhythm = chordRhythmEnabled && harmonyEnabled && !riffEnabled;
   const events = displayChordRhythm ? part.idea.chordRhythm : part.idea.riff;
@@ -285,7 +313,7 @@ function IdeaCard({ part, isPlaying, active, activeTime, activeStep, selectedCho
   const meterLabel = Array.from(new Set(part.idea.meterMap.meters.map((meter) => meter.label))).join(" / ");
   const liveIndex = isPlaying && activeTime !== null ? events.findIndex((event) => activeTime >= event.time - 0.001 && activeTime < event.time + event.duration - 0.001) : -1;
   const activeIndex = activeStep ? activeStep.index : liveIndex >= 0 ? liveIndex : null;
-  return <article className="idea-card"><div className="part-body idea-body"><div className="part-topline"><div><div className="part-meta"><span className="active-dot" style={{ background: profiles[part.artist].color }} />{profileStyles[part.artist].label} <span>·</span> {part.section}</div><p className="harmony-center">{part.bars}-bar · {meterLabel} · {keyLabel(part)}{path.includes("→") ? ` → ${path.split(" → ").at(-1)}` : ""}</p></div>{onRemove && <button className="remove" onClick={onRemove} aria-label={`Remove ${part.section}`}>×</button>}</div><div className="chord-chart" aria-label={`Chord chart in ${meterLabel}`}>{part.progression.map((chord, bar) => <button className={active === bar ? "chart-chord active" : "chart-chord"} key={`${chord}-${bar}`} onClick={() => onAuditionChord(bar)} aria-label={`Play ${chord} and show its guitar shape`} aria-pressed={selectedChord?.bar === bar}>{chord}</button>)}</div><div className="idea-controls"><div className="transport-controls"><button className={`play-idea ${isPlaying ? "is-playing" : ""}`} onClick={onPlay} aria-label={isPlaying ? "Stop loop" : "Loop generated idea"}><span className={`transport-icon ${isPlaying ? "stop" : "play"}`} aria-hidden="true" /></button><button className={`harmony-toggle ${harmonyEnabled ? "is-on" : ""}`} onClick={onToggleHarmony} aria-pressed={harmonyEnabled}>{harmonyEnabled ? "♬ Harmony on" : "♬ Harmony muted"}</button><button className={`chord-rhythm-toggle ${chordRhythmEnabled ? "is-on" : ""}`} onClick={onToggleChordRhythm} aria-pressed={chordRhythmEnabled}>{chordRhythmEnabled ? "Chord rhythm on" : "Chord rhythm off"}</button><button className={`riff-toggle ${riffEnabled ? "is-on" : ""}`} onClick={onToggleRiff} aria-pressed={riffEnabled}>{riffEnabled ? "Riff on" : "Riff muted"}</button><div className="export-controls"><button className={`midi-button chord-copy ${copied ? "is-copied" : ""}`} onClick={onCopy} aria-label="Copy chord names as comma-separated text">{copied ? "Copied" : "Copy"}</button><button className="midi-button" onClick={exportIdea} aria-label={pluginHost ? "Set this idea for the native MIDI drag bar" : "Download MIDI"}>{pluginHost ? "Arm drag bar ↓" : "MIDI"}</button></div></div>{pluginHost && <div className="plugin-export-options" aria-label="Logic MIDI export options"><button className="midi-button" onClick={() => setExportOptions((current) => ({ ...current, multipleTracks: !current.multipleTracks }))}>{exportOptions.multipleTracks ? "Multi tracks" : "Single track"}</button><button className={`midi-button ${exportOptions.stringChannels ? "is-selected" : ""}`} onClick={() => setExportOptions((current) => ({ ...current, stringChannels: !current.stringChannels }))}>Strings → ch 1–6</button><button className={`midi-button ${exportOptions.invertedChannels ? "is-selected" : ""}`} onClick={() => setExportOptions((current) => ({ ...current, invertedChannels: !current.invertedChannels }))}>Ch invert</button></div>}<p className="idea-mode-note">{pluginHost ? "Logic MIDI output follows the Riff, Harmony, and Chord rhythm toggles above. Hold and drag the native bar below into Logic's Tracks area. " : ""}Fretboard: {modeLabel}{chordRhythmEnabled && riffEnabled ? " · both lanes play" : ""}</p><label className="tempo-control"><span>Tempo</span><input className="pill-slider" type="range" min="70" max="190" value={part.idea.tempo} style={pillSliderStyle(part.idea.tempo, 70, 190, "#e6e6df")} onChange={(event) => onTempoChange(Number(event.target.value))} aria-label={`${part.section} tempo`} /><output>{part.idea.tempo}</output></label></div><div className="riff-navigator" aria-label={`${modeLabel} note navigator`}><button className="fret-nav previous" onClick={() => onStep(-1)} aria-label={`Previous ${modeLabel.toLowerCase()} event`}>‹</button><div className="riff-fret-stage"><RiffTimeline events={events} activeBar={active} activeIndex={activeIndex} meterMap={part.idea.meterMap} /><Fretboard events={events} activeTime={activeTime} activeStep={activeStep} chordPreview={selectedChord?.event} isPlaying={isPlaying} label={modeLabel} /></div><button className="fret-nav next" onClick={() => onStep(1)} aria-label={`Next ${modeLabel.toLowerCase()} event`}>›</button></div></div></article>;
+  return <article className="idea-card"><div className="part-body idea-body"><div className="part-topline"><div><div className="part-meta"><span className="active-dot" style={{ background: profiles[part.artist].color }} />{profileStyles[part.artist].label} <span>·</span> {part.section}</div><p className="harmony-center">{part.bars}-bar · {meterLabel} · {keyLabel(part)}{path.includes("→") ? ` → ${path.split(" → ").at(-1)}` : ""}</p></div>{onRemove && <button className="remove" onClick={onRemove} aria-label={`Remove ${part.section}`}>×</button>}</div><div className="chord-chart" aria-label={`Chord chart in ${meterLabel}`}>{part.progression.map((chord, bar) => <button className={active === bar ? "chart-chord active" : "chart-chord"} key={`${chord}-${bar}`} onClick={() => onAuditionChord(bar)} aria-label={`Play ${chord} and show its guitar shape`} aria-pressed={selectedChord?.bar === bar}>{chord}</button>)}</div><div className="idea-controls"><div className="transport-controls"><button className={`play-idea ${isPlaying ? "is-playing" : ""}`} onClick={onPlay} aria-label={isPlaying ? "Stop loop" : "Loop generated idea"}><span className={`transport-icon ${isPlaying ? "stop" : "play"}`} aria-hidden="true" /></button><button className={`harmony-toggle ${harmonyEnabled ? "is-on" : ""}`} onClick={onToggleHarmony} aria-pressed={harmonyEnabled}>{harmonyEnabled ? "♬ Harmony on" : "♬ Harmony muted"}</button><button className={`chord-rhythm-toggle ${chordRhythmEnabled ? "is-on" : ""}`} onClick={onToggleChordRhythm} aria-pressed={chordRhythmEnabled}>{chordRhythmEnabled ? "Chord rhythm on" : "Chord rhythm off"}</button><button className={`riff-toggle ${riffEnabled ? "is-on" : ""}`} onClick={onToggleRiff} aria-pressed={riffEnabled}>{riffEnabled ? "Riff on" : "Riff muted"}</button><div className="export-controls"><button className={`midi-button chord-copy ${copied ? "is-copied" : ""}`} onClick={onCopy} aria-label="Copy chord names as comma-separated text">{copied ? "Copied" : "Copy"}</button>{!pluginHost && <button className="midi-button" onClick={exportIdea} aria-label="Download MIDI">MIDI</button>}</div></div>{pluginHost && <div className="plugin-export-options" aria-label="Logic MIDI export options"><button className="midi-button" onClick={() => setExportOptions((current) => ({ ...current, multipleTracks: !current.multipleTracks }))}>{exportOptions.multipleTracks ? "Multi tracks" : "Single track"}</button><button className={`midi-button ${exportOptions.stringChannels ? "is-selected" : ""}`} onClick={() => setExportOptions((current) => ({ ...current, stringChannels: !current.stringChannels }))}>Strings → ch 1–6</button><button className={`midi-button ${exportOptions.invertedChannels ? "is-selected" : ""}`} onClick={() => setExportOptions((current) => ({ ...current, invertedChannels: !current.invertedChannels }))}>Ch invert</button></div>}<p className="idea-mode-note">{pluginHost ? "Logic MIDI output follows the Riff, Harmony, and Chord rhythm toggles above. Hold and drag the single MIDI button above the Riffizer interface into Logic's Tracks area. " : ""}Fretboard: {modeLabel}{chordRhythmEnabled && riffEnabled ? " · both lanes play" : ""}</p><label className="tempo-control"><span>{pluginHost ? "Project tempo" : "Tempo"}</span><input className="pill-slider" type="range" min="70" max="190" value={part.idea.tempo} style={pillSliderStyle(part.idea.tempo, 70, 190, "#e6e6df")} onChange={(event) => onTempoChange(Number(event.target.value))} aria-label={`${part.section} tempo`} disabled={pluginHost} /><output>{part.idea.tempo}</output></label></div><div className="riff-navigator" aria-label={`${modeLabel} note navigator`}><button className="fret-nav previous" onClick={() => onStep(-1)} aria-label={`Previous ${modeLabel.toLowerCase()} event`}>‹</button><div className="riff-fret-stage"><RiffTimeline events={events} activeBar={active} activeIndex={activeIndex} meterMap={part.idea.meterMap} /><Fretboard events={events} activeTime={activeTime} activeStep={activeStep} chordPreview={selectedChord?.event} isPlaying={isPlaying} label={modeLabel} /></div><button className="fret-nav next" onClick={() => onStep(1)} aria-label={`Next ${modeLabel.toLowerCase()} event`}>›</button></div></div></article>;
 }
 
 function RiffTimeline({ events, activeBar, activeIndex, meterMap }: { events: PerformanceEvent[]; activeBar: number | null; activeIndex: number | null; meterMap: PerformanceIdea["meterMap"] }) {

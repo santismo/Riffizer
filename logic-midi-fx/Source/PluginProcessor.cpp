@@ -34,12 +34,17 @@ void RiffizerMIDIFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer
   if (!current || current->notes.empty() || current->loopBeats <= 0.0 || currentSampleRate <= 0.0) return;
 
   double startBeat = 0.0;
+  auto tempo = current->tempo > 1.0 ? current->tempo : 120.0;
+  auto isPlaying = true;
   if (auto* playHead = getPlayHead()) {
     if (const auto position = playHead->getPosition()) {
       if (const auto ppq = position->getPpqPosition()) startBeat = *ppq;
+      if (const auto bpm = position->getBpm(); bpm && *bpm > 1.0) tempo = *bpm;
+      isPlaying = position->getIsPlaying();
     }
   }
-  const auto tempo = current->tempo > 1.0 ? current->tempo : 120.0;
+  currentProjectTempo.store(tempo, std::memory_order_relaxed);
+  if (!isPlaying) return;
   const auto beatLength = static_cast<double>(buffer.getNumSamples()) * tempo / (60.0 * currentSampleRate);
   const auto endBeat = startBeat + beatLength;
   const auto firstLoop = static_cast<int>(std::floor(startBeat / current->loopBeats)) - 1;
@@ -92,6 +97,14 @@ void RiffizerMIDIFXAudioProcessor::setGeneratedIdea(const juce::var& payload) {
   if (const auto* tempo = child(*idea, "tempo")) next->tempo = number(*tempo, 120.0);
   if (const auto* artist = child(*part, "artist")) next->artist = artist->toString();
   if (const auto* section = child(*part, "section")) next->section = section->toString();
+  if (const auto* style = child(payload, "style")) next->style = style->toString();
+  if (const auto* progression = child(*part, "progression")) {
+    if (const auto* chordArray = progression->getArray()) {
+      juce::StringArray chordNames;
+      for (const auto& chord : *chordArray) chordNames.add(chord.toString());
+      next->chords = chordNames.joinIntoString(", ");
+    }
+  }
   if (const auto* meterMap = child(*idea, "meterMap")) if (const auto* total = child(*meterMap, "totalBeats")) next->loopBeats = juce::jmax(1.0, number(*total, 4.0));
   if (const auto* settings = child(payload, "settings")) {
     next->riffEnabled = enabled(*settings, "riffEnabled", true);
@@ -110,27 +123,29 @@ int RiffizerMIDIFXAudioProcessor::channelFor(const NoteEvent& event, const Expor
   return options.invertedChannels ? 6 - event.guitarString : event.guitarString + 1;
 }
 
-void RiffizerMIDIFXAudioProcessor::addMidiTrack(juce::MidiFile& file, const Sequence& data, Lane lane, const juce::String& name, const ExportOptions& options) {
+void RiffizerMIDIFXAudioProcessor::addMidiTrack(juce::MidiFile& file, const Sequence& data, Lane lane, const juce::String& name, double tempo, const ExportOptions& options) {
+  constexpr double ticksPerBeat = 960.0;
   juce::MidiMessageSequence track;
   track.addEvent(juce::MidiMessage::textMetaEvent(3, name), 0.0);
-  track.addEvent(juce::MidiMessage::tempoMetaEvent(juce::roundToInt(60000000.0 / data.tempo)), 0.0);
+  track.addEvent(juce::MidiMessage::tempoMetaEvent(juce::roundToInt(60000000.0 / tempo)), 0.0);
   for (const auto& event : data.notes) if (event.lane == lane) {
     const auto channel = channelFor(event, options);
-    track.addEvent(juce::MidiMessage::noteOn(channel, event.midi, event.velocity), event.beat);
-    track.addEvent(juce::MidiMessage::noteOff(channel, event.midi), event.beat + event.duration);
+    track.addEvent(juce::MidiMessage::noteOn(channel, event.midi, event.velocity), event.beat * ticksPerBeat);
+    track.addEvent(juce::MidiMessage::noteOff(channel, event.midi), (event.beat + event.duration) * ticksPerBeat);
   }
   track.updateMatchedPairs();
   file.addTrack(track);
 }
 
-void RiffizerMIDIFXAudioProcessor::addMergedTrack(juce::MidiFile& file, const Sequence& data, const juce::String& name, const ExportOptions& options) {
+void RiffizerMIDIFXAudioProcessor::addMergedTrack(juce::MidiFile& file, const Sequence& data, const juce::String& name, double tempo, const ExportOptions& options) {
+  constexpr double ticksPerBeat = 960.0;
   juce::MidiMessageSequence track;
   track.addEvent(juce::MidiMessage::textMetaEvent(3, name), 0.0);
-  track.addEvent(juce::MidiMessage::tempoMetaEvent(juce::roundToInt(60000000.0 / data.tempo)), 0.0);
+  track.addEvent(juce::MidiMessage::tempoMetaEvent(juce::roundToInt(60000000.0 / tempo)), 0.0);
   for (const auto& event : data.notes) {
     const auto channel = channelFor(event, options);
-    track.addEvent(juce::MidiMessage::noteOn(channel, event.midi, event.velocity), event.beat);
-    track.addEvent(juce::MidiMessage::noteOff(channel, event.midi), event.beat + event.duration);
+    track.addEvent(juce::MidiMessage::noteOn(channel, event.midi, event.velocity), event.beat * ticksPerBeat);
+    track.addEvent(juce::MidiMessage::noteOff(channel, event.midi), (event.beat + event.duration) * ticksPerBeat);
   }
   track.updateMatchedPairs();
   file.addTrack(track);
@@ -141,12 +156,14 @@ bool RiffizerMIDIFXAudioProcessor::writeMidiFile(const juce::File& destination, 
   if (!data || data->notes.empty()) return false;
   juce::MidiFile file;
   file.setTicksPerQuarterNote(960);
-  const auto prefix = data->section.isNotEmpty() ? data->section : "Riffizer";
+  const auto exportTempo = projectTempo() > 1.0 ? projectTempo() : data->tempo;
+  const auto style = data->style.isNotEmpty() ? data->style : "Riffizer style";
+  const auto chords = data->chords.isNotEmpty() ? data->chords : "generated chords";
   if (options.multipleTracks) {
-    addMidiTrack(file, *data, Lane::riff, prefix + " · " + data->artist + " riff", options);
-    addMidiTrack(file, *data, Lane::harmony, prefix + " · chord chart", options);
-    addMidiTrack(file, *data, Lane::chordRhythm, prefix + " · " + data->artist + " chord rhythm", options);
-  } else addMergedTrack(file, *data, prefix + " · Riffizer", options);
+    addMidiTrack(file, *data, Lane::riff, style + " · riff · " + chords, exportTempo, options);
+    addMidiTrack(file, *data, Lane::harmony, style + " · chords · " + chords, exportTempo, options);
+    addMidiTrack(file, *data, Lane::chordRhythm, style + " · chord rhythm · " + chords, exportTempo, options);
+  } else addMergedTrack(file, *data, style + " · " + chords, exportTempo, options);
   if (auto output = std::unique_ptr<juce::FileOutputStream>(destination.createOutputStream())) return file.writeTo(*output);
   return false;
 }
@@ -155,10 +172,10 @@ juce::File RiffizerMIDIFXAudioProcessor::createDragMidiFile(const ExportOptions&
   const auto data = std::atomic_load(&sequence);
   if (!data || data->notes.empty()) return {};
 
-  const auto artist = data->artist.isNotEmpty() ? data->artist : "style";
-  const auto section = data->section.isNotEmpty() ? data->section : "idea";
+  const auto style = data->style.isNotEmpty() ? data->style : "Riffizer style";
+  const auto chords = data->chords.isNotEmpty() ? data->chords : "generated chords";
   const auto layout = options.multipleTracks ? "multitrack" : "single-track";
-  const auto stem = juce::File::createLegalFileName("Riffizer " + artist + " " + section + " " + layout);
+  const auto stem = juce::File::createLegalFileName(style + " - " + chords + " - " + layout);
   const auto destination = juce::File::getSpecialLocation(juce::File::tempDirectory)
     .getNonexistentChildFile(stem, ".mid", false);
   return writeMidiFile(destination, options) ? destination : juce::File{};

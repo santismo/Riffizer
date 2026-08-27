@@ -59,6 +59,7 @@ RiffizerMIDIFXAudioProcessorEditor::RiffizerMIDIFXAudioProcessorEditor(RiffizerM
   addAndMakeVisible(*browser);
   addAndMakeVisible(*dragButton);
   browser->goToURL(juce::WebBrowserComponent::getResourceProviderRoot());
+  startTimerHz(4);
   setResizable(true, true);
   setSize(1180, 790);
 }
@@ -67,8 +68,15 @@ RiffizerMIDIFXAudioProcessorEditor::~RiffizerMIDIFXAudioProcessorEditor() = defa
 
 void RiffizerMIDIFXAudioProcessorEditor::resized() {
   auto area = getLocalBounds();
-  dragButton->setBounds(area.removeFromBottom(46).reduced(8, 5));
+  dragButton->setBounds(area.removeFromTop(46).reduced(8, 5));
   browser->setBounds(area);
+}
+
+void RiffizerMIDIFXAudioProcessorEditor::timerCallback() {
+  const auto tempo = ownerProcessor.projectTempo();
+  if (tempo <= 1.0) return;
+  dragButton->setButtonText("HOLD + DRAG MIDI  →  LOGIC   ·   " + juce::String(tempo, 1) + " BPM");
+  browser->emitEventIfBrowserIsVisible("riffizerHostTempo", tempo);
 }
 
 std::optional<juce::WebBrowserComponent::Resource> RiffizerMIDIFXAudioProcessorEditor::webResource(const juce::String& requestedPath) {
