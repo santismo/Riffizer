@@ -11,6 +11,10 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "dist/**",
+    ".wrangler/**",
+    "logic-midi-fx/build/**",
+    "logic-midi-fx/Resources/**",
     "next-env.d.ts",
   ]),
 ]);

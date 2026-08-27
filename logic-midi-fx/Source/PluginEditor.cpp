@@ -7,6 +7,9 @@ juce::String mimeFor(const juce::String& path) {
   if (path.endsWithIgnoreCase(".css")) return "text/css";
   if (path.endsWithIgnoreCase(".svg")) return "image/svg+xml";
   if (path.endsWithIgnoreCase(".png")) return "image/png";
+  if (path.endsWithIgnoreCase(".mp3")) return "audio/mpeg";
+  if (path.endsWithIgnoreCase(".wav")) return "audio/wav";
+  if (path.endsWithIgnoreCase(".txt")) return "text/plain";
   return "application/octet-stream";
 }
 

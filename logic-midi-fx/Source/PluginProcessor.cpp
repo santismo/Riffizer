@@ -56,7 +56,8 @@ void RiffizerMIDIFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer
     for (const auto& event : current->notes) {
       const auto sendsLane = event.lane == Lane::riff ? current->riffEnabled
         : event.lane == Lane::harmony ? current->harmonyEnabled && !current->chordRhythmEnabled
-        : current->harmonyEnabled && current->chordRhythmEnabled;
+        : event.lane == Lane::chordRhythm ? current->harmonyEnabled && current->chordRhythmEnabled
+        : false;
       if (!sendsLane) continue;
       const auto noteOn = loopStart + event.beat;
       const auto noteOff = noteOn + event.duration;
@@ -110,10 +111,14 @@ void RiffizerMIDIFXAudioProcessor::setGeneratedIdea(const juce::var& payload) {
     next->riffEnabled = enabled(*settings, "riffEnabled", true);
     next->harmonyEnabled = enabled(*settings, "harmonyEnabled", true);
     next->chordRhythmEnabled = enabled(*settings, "chordRhythmEnabled", false);
+    next->bassEnabled = enabled(*settings, "bassEnabled", false);
+    next->drumsEnabled = enabled(*settings, "drumsEnabled", false);
   }
   if (const auto* lane = child(*idea, "riff")) appendLane(*next, *lane, Lane::riff);
   if (const auto* lane = child(*idea, "harmony")) appendLane(*next, *lane, Lane::harmony);
   if (const auto* lane = child(*idea, "chordRhythm")) appendLane(*next, *lane, Lane::chordRhythm);
+  if (const auto* lane = child(*idea, "bass")) appendLane(*next, *lane, Lane::bass);
+  if (const auto* lane = child(*idea, "drums")) appendLane(*next, *lane, Lane::drums);
   const std::shared_ptr<const Sequence> frozen = std::move(next);
   std::atomic_store(&sequence, frozen);
   const juce::ScopedLock lock(payloadLock);
@@ -138,8 +143,10 @@ juce::String RiffizerMIDIFXAudioProcessor::chordNames() const {
 }
 
 int RiffizerMIDIFXAudioProcessor::channelFor(const NoteEvent& event, const ExportOptions& options) {
+  if (event.lane == Lane::drums) return 10;
   if (!options.stringChannels) return 1;
-  return options.invertedChannels ? 6 - event.guitarString : event.guitarString + 1;
+  if (event.lane == Lane::bass) return options.invertedChannels ? event.guitarString + 1 : 4 - juce::jmin(3, event.guitarString);
+  return options.invertedChannels ? event.guitarString + 1 : 6 - event.guitarString;
 }
 
 void RiffizerMIDIFXAudioProcessor::addMidiTrack(juce::MidiFile& file, const Sequence& data, Lane lane, const juce::String& name, double tempo, const ExportOptions& options) {
@@ -182,6 +189,8 @@ bool RiffizerMIDIFXAudioProcessor::writeMidiFile(const juce::File& destination, 
     addMidiTrack(file, *data, Lane::riff, style + " · riff · " + chords, exportTempo, options);
     addMidiTrack(file, *data, Lane::harmony, style + " · chords · " + chords, exportTempo, options);
     addMidiTrack(file, *data, Lane::chordRhythm, style + " · chord rhythm · " + chords, exportTempo, options);
+    addMidiTrack(file, *data, Lane::bass, style + " · bass · " + chords, exportTempo, options);
+    addMidiTrack(file, *data, Lane::drums, style + " · drums · " + chords, exportTempo, options);
   } else addMergedTrack(file, *data, style + " · " + chords, exportTempo, options);
   if (auto output = std::unique_ptr<juce::FileOutputStream>(destination.createOutputStream())) return file.writeTo(*output);
   return false;

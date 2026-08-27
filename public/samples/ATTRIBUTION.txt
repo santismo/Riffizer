@@ -1,0 +1,21 @@
+Riffizer sample attribution
+===========================
+
+The electric guitar, acoustic guitar, nylon guitar, and electric bass
+multisamples are redistributed from Nicholaus P. Brosowsky's
+tonejs-instruments project:
+
+https://github.com/nbrosowsky/tonejs-instruments
+
+The source project identifies the samples as CC BY 3.0 and credits the
+underlying sources in its sample-source-info.txt (Karoryfer, University of
+Iowa Electronic Music Studios, and Freesound contributor quartertone for the
+instruments used here). The samples were trimmed and normalized by the
+tonejs-instruments project. Riffizer renames and bundles a compact subset for
+offline playback.
+
+License: Creative Commons Attribution 3.0
+https://creativecommons.org/licenses/by/3.0/
+
+The five short drum one-shots were generated specifically for Riffizer and are
+included under Riffizer's project license.

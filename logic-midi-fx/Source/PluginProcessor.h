@@ -45,13 +45,13 @@ public:
   bool writeMidiFile(const juce::File&, const ExportOptions&) const;
 
 private:
-  enum class Lane { riff, harmony, chordRhythm };
+  enum class Lane { riff, harmony, chordRhythm, bass, drums };
   struct NoteEvent { double beat = 0.0, duration = .25; int midi = 60, guitarString = 0; float velocity = .8f; Lane lane = Lane::riff; };
   struct Sequence {
     std::vector<NoteEvent> notes;
     double loopBeats = 4.0, tempo = 120.0;
     juce::String artist, section, style, chords;
-    bool riffEnabled = true, harmonyEnabled = true, chordRhythmEnabled = false;
+    bool riffEnabled = true, harmonyEnabled = true, chordRhythmEnabled = false, bassEnabled = false, drumsEnabled = false;
   };
 
   static int channelFor(const NoteEvent&, const ExportOptions&);

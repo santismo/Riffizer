@@ -8,11 +8,20 @@ The public Site is available at [riffizer.ojertrejo.chatgpt.site](https://riffiz
 
 ## What it does
 
-- Builds a chord chart and a playable riff together, with optional chord-harmony
-  playback and MIDI export.
+- Builds a chord chart, playable riff, coordinated bass line, and style-shaped
+  drum part together, with optional chord-harmony playback and MIDI export.
 - Creates a separate style-aware **Chord rhythm** lane: compact playable chord
   stabs whose rhythm is generated from the selected profile and scored against
   the riff's accents and gaps while the chart remains unchanged.
+- Keeps the complex chord qualities intact while selecting from varied
+  style-aware guitar grips with contiguous strings, four-fret-or-smaller spans,
+  and no impossible interior string gaps.
+- Locks bass attacks, chord stabs, drum accents, and the riff's strongest notes
+  to a shared accent map while retaining profile-specific fills and motion.
+- Auditions the arrangement with bundled, style-selected guitar and bass
+  multisamples plus baked drum one-shots on both the Site and in the plug-in.
+- Lets the fretboard switch between the riff, chord-rhythm voicings, and a
+  four-string bass fingering view.
 - Keeps the chart fixed when using **Regenerate riff**. Only **Riffize** creates
   a new progression.
 - Keeps whole-section continuity: a new part considers the prior landing,
@@ -48,11 +57,14 @@ produce the Pages artifact in `dist/client`.
 
 `logic-midi-fx/` builds an Apple Audio Unit MIDI Processor with the same
 Riffizer UI and generator. It follows Logic's project tempo and outputs
-generated MIDI while the transport runs, with the existing **Riff**,
-**Harmony**, and **Chord rhythm** controls selecting the live MIDI lanes. The
-compact black **Drag MIDI** control sits beside **Copy Chord Names** above the
-plug-in UI and starts a file drag with no save dialog: **Multi tracks** carries
-named riff, chord-chart, and chord-rhythm lanes; **Single track** merges them.
+generated guitar MIDI while the transport runs: **Riff**, **Harmony**, and
+**Chord rhythm** select the live lane, while bass and drums stay out of the
+instrument receiving the plug-in's transport output. The plug-in's own play
+button still auditions every enabled lane through its bundled samples. The compact
+black **Drag MIDI** control sits beside **Copy Chord Names** above the plug-in UI
+and starts a file drag with no save dialog: **5 tracks** carries
+named riff, chord-chart, chord-rhythm, bass, and General MIDI drum lanes;
+**Single track** merges them while keeping drums on MIDI channel 10.
 Its export controls can route guitar strings to MIDI channels 1–6, with
 optional channel inversion. Generated arrangements and playback/export settings
 are stored in the Audio Unit state, so closing and reopening its window—or the
@@ -73,3 +85,8 @@ separate named lanes. Logic controls the final tracks and region placement.
 ## License
 
 Released under the [Santismo License](LICENSE).
+
+Bundled instrument multisamples come from
+[tonejs-instruments](https://github.com/nbrosowsky/tonejs-instruments) under
+CC BY 3.0. Full attribution is included in
+[`public/samples/ATTRIBUTION.txt`](public/samples/ATTRIBUTION.txt).

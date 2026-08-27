@@ -74,7 +74,7 @@ option { background: #252525; }
 .add-button:hover { background: #fff; }
 .idea-controls { display: grid; gap: 8px; margin: 15px 0 13px; }
 .transport-controls { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.play-idea, .midi-button, .harmony-toggle, .chord-rhythm-toggle, .riff-toggle { border: 1px solid #464646; border-radius: 7px; background: #1b1b1b; color: #e4e4dd; height: 34px; font-size: 12px; }
+.play-idea, .midi-button, .harmony-toggle, .chord-rhythm-toggle, .riff-toggle, .bass-toggle, .drums-toggle { border: 1px solid #464646; border-radius: 7px; background: #1b1b1b; color: #e4e4dd; height: 34px; font-size: 12px; }
 .play-idea { width: 42px; flex: 0 0 42px; display: grid; place-items: center; padding: 0; background: #151515; border-color: #55554f; }
 .play-idea.is-playing { background: #202725; border-color: #90c3a7; }
 .transport-icon { display: block; }
@@ -90,11 +90,16 @@ option { background: #252525; }
 .tempo-control output { color: #f0f0e9; font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
 .harmony-toggle { inline-size: 126px; flex: 0 0 126px; padding: 0 8px; color: #a3a39c; white-space: nowrap; }
 .harmony-toggle.is-on { border-color: #6da5ca; color: #dcefff; background: #1b2a34; }
-.chord-rhythm-toggle, .riff-toggle { padding: 0 8px; color: #aaa9a3; white-space: nowrap; }
+.chord-rhythm-toggle, .riff-toggle, .bass-toggle, .drums-toggle { padding: 0 8px; color: #aaa9a3; white-space: nowrap; }
 .chord-rhythm-toggle.is-on { border-color: #d3a76b; color: #fff0d7; background: #382a1b; }
 .riff-toggle.is-on { border-color: #7aaee0; color: #e0f1ff; background: #1b2d3d; }
+.bass-toggle.is-on { border-color: #86c49a; color: #e0ffea; background: #1b3324; }
+.drums-toggle.is-on { border-color: #c69add; color: #f7e5ff; background: #302039; }
+.track-view-row { display: flex; align-items: center; }
+.track-view-selector { display: flex; align-items: center; gap: 8px; color: #999992; font-size: 10px; }
+.track-view-selector select { height: 32px; min-width: 150px; border: 1px solid #494943; border-radius: 7px; background: #181818; color: #ecece6; padding: 0 28px 0 9px; font-size: 11px; }
 .idea-mode-note { margin: -1px 1px 0; color: #8d8d87; font-size: 10px; line-height: 1.35; }
-.play-idea:hover, .midi-button:hover, .harmony-toggle:hover, .chord-rhythm-toggle:hover, .riff-toggle:hover, .tempo-control:hover { filter: brightness(1.14); }
+.play-idea:hover, .midi-button:hover, .harmony-toggle:hover, .chord-rhythm-toggle:hover, .riff-toggle:hover, .bass-toggle:hover, .drums-toggle:hover, .tempo-control:hover { filter: brightness(1.14); }
 .chord-chart { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-top: 14px; }
 .chart-chord { min-height: 45px; border: 1px solid #3e3e39; border-radius: 7px; background: #191919; color: #ecece6; font-size: 13px; overflow-wrap: anywhere; }
 .chart-chord:hover { background: #292929; border-color: #707069; }
@@ -128,5 +133,5 @@ option { background: #252525; }
 .fret.active::after { content: ""; width: 14px; height: 14px; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; border: 2px solid #f7fbff; box-shadow: 0 0 0 2px #11110f, 0 0 14px currentColor; z-index: 1; }
 .keyer-board.riff .fret.active { color: #4ab0ff; }.keyer-board.riff .fret.active::after { background: #338fe8; }
 @media (max-width: 720px) { .topbar { padding: 0 14px; } .topbar-label { display: none; } .layout { display: block; } .sidebar { border-right: 0; border-bottom: 1px solid var(--line); padding: 20px 14px; display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; } .sidebar > .eyebrow, .sidebar .complexity, .sidebar .rhythm-complexity, .sidebar .modulation, .sidebar .generate-row, .sidebar .profile-note { grid-column: 1 / -1; } .sidebar .field-stack { margin-bottom: 15px; } .workspace { padding: 16px 10px 60px; } .part-body, .draft-body { padding: 12px; } .riff-navigator { display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "stage stage" "previous next"; gap: 8px; padding: 0; } .riff-fret-stage { grid-area: stage; min-width: 0; } .fret-nav { position: static; transform: none; width: auto; min-height: 42px; border-radius: 7px; font-size: 27px; background: #161615; } .fret-nav.previous { grid-area: previous; } .fret-nav.next { grid-area: next; } .fret-numbers, .fret-string { grid-template-columns: 20px repeat(13, minmax(14px, 1fr)); } .fret-string, .fret { height: 25px; } .fret.active::after { width: 12px; height: 12px; } .riff-timeline { gap: 1px; } .chord-chart { gap: 6px; } .chart-chord { min-height: 48px; font-size: 12px; } .draft-actions { justify-content: stretch; } .draft-actions button { flex: 1; padding: 10px 7px; } }
-@media (max-width: 720px) { .idea-controls { gap: 7px; } .transport-controls { flex-wrap: wrap; } .harmony-toggle, .chord-rhythm-toggle, .riff-toggle { flex: 1 1 auto; inline-size: auto; } .export-controls { margin-left: 0; } }
+@media (max-width: 720px) { .idea-controls { gap: 7px; } .transport-controls { flex-wrap: wrap; } .harmony-toggle, .chord-rhythm-toggle, .riff-toggle, .bass-toggle, .drums-toggle { flex: 1 1 auto; inline-size: auto; } .export-controls { margin-left: 0; } }
 @media (max-width: 350px) { .harmony-toggle { inline-size: 110px; flex-basis: 110px; font-size: 11px; } .midi-button { padding: 0 7px; } }

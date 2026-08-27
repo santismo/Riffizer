@@ -14,6 +14,10 @@ export type PerformanceIdea = {
   harmony: HarmonyEvent[];
   /** A separate, profile-shaped chord-stab lane. It never changes the chart. */
   chordRhythm: HarmonyEvent[];
+  /** A four-string bass part locked to the chord-stab grid and riff accents. */
+  bass: HarmonyEvent[];
+  /** General MIDI drum notes shaped by the shared riff/chord-rhythm accents. */
+  drums: PerformanceEvent[];
   riff: PerformanceEvent[];
 };
 
@@ -38,8 +42,10 @@ type RiffCursor = { midi: number; gripCenter?: number; anchor?: FretNote; handPo
 type GripContext = { anchor: FretNote; handPosition: number; previousCenter?: number; previousAnchor?: FretNote; allowOpenPedal: boolean; maxSpan: number; maxShift: number; maxStringTravel: number };
 type TextureState = { singles: number; dyads: number; triads: number; lastSize: 1 | 2 | 3 };
 type PlayableFragment = { notes: FretNote[]; center: number; anchor: FretNote; score: number };
+type CompactGrip = { notes: FretNote[]; score: number; center: number };
 
 const guitarTuning = [64, 59, 55, 50, 45, 40];
+const bassTuning = [43, 38, 33, 28];
 const visibleFrets = 12;
 const mod = (value: number, divisor = 12) => ((value % divisor) + divisor) % divisor;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -215,8 +221,8 @@ function locateLeadPc(pc: number, nearMidi: number, position: number, comfort: P
   return candidates[0] ?? { midi: guitarTuning[0], string: 0, fret: 0 };
 }
 
-function solveCompactGrip(pcsHighToLow: number[], context: GripContext) {
-  let best: { notes: FretNote[]; score: number; center: number } | null = null;
+function solveCompactGrip(pcsHighToLow: number[], context: GripContext): CompactGrip | null {
+  let best: CompactGrip | null = null;
   const gripSize = pcsHighToLow.length;
   for (let firstString = 0; firstString <= guitarTuning.length - gripSize; firstString += 1) {
     const strings = Array.from({ length: gripSize }, (_, index) => firstString + index);
@@ -407,11 +413,43 @@ function riffForBar(profile: PerformanceProfile, artist: Artist, section: Sectio
   });
 }
 
-export function createChordPreview(chord: string, position = 5): PerformanceEvent {
-  const [root, third, fifth, color] = chordPcs(chord); const anchor = locateLeadPc(color, 67, position + 2);
-  const context = { handPosition: position, previousCenter: undefined, previousAnchor: undefined, allowOpenPedal: false, maxSpan: 5, maxShift: 5, maxStringTravel: 2 };
-  const full = solveCompactGrip([mod(anchor.midi), fifth, third, root], { ...context, anchor }) ?? compactFragment(anchor, [[fifth, root], [third, root], [fifth, third], [color, third]], 3, context);
-  return { time: 0, duration: 0.92, notes: full.notes, velocity: 0.75 };
+function chordVoicingPlans(artist?: Artist) {
+  if (artist === "CHON" || artist === "Owane") return [[3, 1, 0], [3, 2, 1], [1, 3, 0], [2, 3, 1], [3, 2, 1, 0], [0, 3, 1]];
+  if (artist === "Guthrie Govan" || artist === "Greg Howe") return [[3, 1, 0], [1, 3, 0], [3, 2, 0], [2, 3, 1], [3, 2, 1, 0], [0, 3, 2]];
+  if (artist === "Yngwie Malmsteen" || artist === "Moray Pringle") return [[3, 2, 0], [3, 1, 0], [2, 3, 0], [3, 2, 1, 0], [0, 3, 2], [1, 3, 0]];
+  return [[3, 2, 1, 0], [3, 1, 0], [3, 2, 0], [1, 3, 0], [2, 3, 1], [0, 3, 1]];
+}
+
+/** Builds a color-preserving voicing from physically playable, contiguous
+ * string sets. `variant` changes the grip without changing the chord tones. */
+export function createChordPreview(chord: string, position = 5, artist?: Artist, variant = 0, compact = false): PerformanceEvent {
+  const tones = chordPcs(chord);
+  const candidates = chordVoicingPlans(artist).flatMap((indexes, planIndex) => {
+    const pcs = indexes.reduce<number[]>((result, index) => {
+      const pc = tones[index];
+      if (pc !== undefined && !result.includes(pc)) result.push(pc);
+      return result;
+    }, []);
+    if (compact && pcs.length > 3) return [];
+    if (pcs.length < 3) tones.forEach((pc) => { if (pcs.length < 3 && !pcs.includes(pc)) pcs.push(pc); });
+    if (pcs.length < 3) return [];
+    const anchor = locateLeadPc(pcs[0], 63 + position, position + 1);
+    const context = { handPosition: position, previousCenter: undefined, previousAnchor: undefined, allowOpenPedal: false, maxSpan: 4, maxShift: 4, maxStringTravel: 2 };
+    const grip = solveCompactGrip(pcs, { ...context, anchor });
+    if (!grip) return [];
+    const frets = grip.notes.map((note) => note.fret);
+    const frettedFingers = new Set(frets.filter((fret) => fret > 0)).size;
+    const pitchSpread = Math.max(...grip.notes.map((note) => note.midi)) - Math.min(...grip.notes.map((note) => note.midi));
+    if (frettedFingers > 4 || pitchSpread > 20) return [];
+    const colorPresent = grip.notes.some((note) => mod(note.midi) === tones[3]);
+    const score = grip.score + planIndex * .22 + (colorPresent ? 0 : 40) + (grip.notes.length === 4 ? (compact ? 8 : -.5) : 0);
+    return [{ ...grip, score }];
+  }).sort((a, b) => a.score - b.score);
+  const pool = candidates.slice(0, Math.min(3, candidates.length));
+  const chosen = pool[mod(variant + chord.split("").reduce((sum, letter) => sum + letter.charCodeAt(0), 0), Math.max(1, pool.length))];
+  if (chosen) return { time: 0, duration: 0.92, notes: chosen.notes, velocity: 0.75 };
+  const color = tones[3]; const anchor = locateLeadPc(color, 67, position + 1);
+  return { time: 0, duration: 0.92, notes: [anchor], velocity: 0.75 };
 }
 
 function weightedMeter(artist: Artist, meters: TimeSignature[]) {
@@ -453,10 +491,10 @@ function chordFeelFor(profile: PerformanceProfile, rhythmComplexity: number): Ha
   return profile.chordFeel;
 }
 
-function harmonyForSection(profile: PerformanceProfile, progression: string[], meterMap: MeterMap, rhythmComplexity: number): HarmonyEvent[] {
+function harmonyForSection(profile: PerformanceProfile, artist: Artist, progression: string[], meterMap: MeterMap, rhythmComplexity: number): HarmonyEvent[] {
   const events: HarmonyEvent[] = []; const feel = chordFeelFor(profile, rhythmComplexity);
   const add = (chord: string, time: number, bar: number, duration: number, velocity = 0.68) => {
-    const voicing = createChordPreview(chord, profile.position);
+    const voicing = createChordPreview(chord, profile.position + (bar % 2), artist, bar);
     events.push({ ...voicing, chord, bar, time: Math.max(0, time), duration: Math.max(0.18, duration), velocity });
   };
   progression.forEach((chord, bar) => {
@@ -479,8 +517,8 @@ function chordRhythmCellScore(profile: PerformanceProfile, cell: ChordRhythmCell
   if (!barRiff.length) return cell.finalHold ? 5 : 0;
   const peakVelocity = Math.max(...barRiff.map((event) => event.velocity));
   const riffAccents = barRiff.filter((event) => event.velocity >= Math.max(.72, peakVelocity - .045));
-  const alignmentBias = profile.riff === "rock" || profile.riff === "interlock" || profile.riff === "sequence" ? .68
-    : profile.riff === "fusion" || profile.riff === "angular" ? .52 : .36;
+  const alignmentBias = profile.riff === "rock" || profile.riff === "interlock" || profile.riff === "sequence" ? .88
+    : profile.riff === "fusion" || profile.riff === "angular" ? .78 : .66;
   const targetDensity: Record<RiffKind, number> = { melodic: 2.3, rock: 3.8, interlock: 5.1, pedal: 3.7, fusion: 4.4, sequence: 4.8, angular: 4.3 };
   const alignmentWindow = Math.max(.1, barBeats / 32);
   const openSpaceWindow = Math.max(.24, barBeats / 14);
@@ -491,8 +529,8 @@ function chordRhythmCellScore(profile: PerformanceProfile, cell: ChordRhythmCell
     const time = start + fraction * barBeats;
     const accentDistance = nearestTimeDistance(time, riffAccents);
     const riffDistance = nearestTimeDistance(time, barRiff);
-    if (accentDistance <= alignmentWindow) { aligned += 1; score += 2.3 + alignmentBias * 2.5; }
-    else if (riffDistance >= openSpaceWindow) { answers += 1; score += 2.2 + (1 - alignmentBias) * 2.4; }
+    if (accentDistance <= alignmentWindow) { aligned += 1; score += 3 + alignmentBias * 3; }
+    else if (riffDistance >= openSpaceWindow) { answers += 1; score += 1.25 + (1 - alignmentBias) * 1.6; }
     else if (riffDistance <= alignmentWindow) { clutter += 1; score -= 2.8 - alignmentBias * 1.4; }
     else score += .35;
     if (cell.accents.includes(hit) && (accentDistance <= alignmentWindow || riffDistance >= openSpaceWindow)) score += 1.15;
@@ -500,13 +538,13 @@ function chordRhythmCellScore(profile: PerformanceProfile, cell: ChordRhythmCell
 
   if (aligned === 0) score -= profile.riff === "melodic" ? 1.5 : 4;
   if (answers === 0 && profile.riff !== "rock" && profile.riff !== "sequence") score -= 2.8;
-  if (aligned > 0 && answers > 0) score += 3.2;
+  if (aligned > 0 && answers > 0) score += 2.1;
   if (clutter > Math.ceil(cell.hits.length / 2)) score -= 5;
   if (section === "Chorus" && cell.hits[0] === 0) score += 1.8;
   return score + Math.random() * .75;
 }
 
-function chordRhythmForSection(profile: PerformanceProfile, progression: string[], meterMap: MeterMap, section: SectionType, riff: PerformanceEvent[]): HarmonyEvent[] {
+function chordRhythmForSection(profile: PerformanceProfile, artist: Artist, progression: string[], meterMap: MeterMap, section: SectionType, riff: PerformanceEvent[]): HarmonyEvent[] {
   const cells = chordRhythmBooks[profile.riff];
   let previousCell = "";
   return progression.flatMap((chord, bar) => {
@@ -517,18 +555,29 @@ function chordRhythmForSection(profile: PerformanceProfile, progression: string[
     const barRiff = riff.filter((event) => event.time >= start - .01 && event.time < start + barBeats - .01);
     const peakVelocity = barRiff.length ? Math.max(...barRiff.map((event) => event.velocity)) : 0;
     const riffAccents = barRiff.filter((event) => event.velocity >= Math.max(.72, peakVelocity - .045));
-    return cell.hits.map((fraction, hit) => {
-      const nextFraction = cell.hits[hit + 1] ?? 1;
+    const snapWindow = .36 / barBeats;
+    const accentFractions = riffAccents.map((event) => clamp((event.time - start) / barBeats, 0, .98));
+    const hitPlan = cell.hits.map((fraction, originalHit) => {
+      const nearestAccent = accentFractions.slice().sort((a, b) => Math.abs(a - fraction) - Math.abs(b - fraction))[0];
+      const snapped = nearestAccent !== undefined && Math.abs(nearestAccent - fraction) <= snapWindow ? nearestAccent : fraction;
+      return { fraction: snapped, originalHit, forcedAccent: nearestAccent === snapped };
+    });
+    const missingAccent = accentFractions.find((fraction) => fraction > .04 && hitPlan.every((hit) => Math.abs(hit.fraction - fraction) > snapWindow));
+    if (missingAccent !== undefined && hitPlan.length < (profile.riff === "melodic" ? 3 : 6)) hitPlan.push({ fraction: missingAccent, originalHit: -1, forcedAccent: true });
+    const uniqueHits = Array.from(new Map(hitPlan.sort((a, b) => a.fraction - b.fraction).map((hit) => [Math.round(hit.fraction * 64), hit])).values());
+    return uniqueHits.map((planned, hit) => {
+      const fraction = planned.fraction;
+      const nextFraction = uniqueHits[hit + 1]?.fraction ?? 1;
       const time = start + barBeats * fraction;
       const aligned = nearestTimeDistance(time, riffAccents) <= Math.max(.1, barBeats / 32);
       const inSpace = nearestTimeDistance(time, barRiff) >= Math.max(.24, barBeats / 14);
-      let duration = cell.finalHold && hit === cell.hits.length - 1
+      let duration = cell.finalHold && hit === uniqueHits.length - 1
         ? Math.max(.26, barBeats * (1 - fraction) * .86)
-        : Math.min(barBeats * (cell.lengths[hit] ?? .16), Math.max(.12, barBeats * (nextFraction - fraction) - .045));
+        : Math.min(barBeats * (cell.lengths[Math.max(0, planned.originalHit)] ?? .16), Math.max(.12, barBeats * (nextFraction - fraction) - .045));
       const nextRiff = barRiff.find((event) => event.time > time + .09);
       if (inSpace && nextRiff) duration = Math.min(duration, Math.max(.12, nextRiff.time - time - .045));
-      const voicing = createChordPreview(chord, profile.position + (bar % 3) - 1);
-      const accented = cell.accents.includes(hit);
+      const voicing = createChordPreview(chord, profile.position + (bar % 3) - 1, artist, bar * 7 + hit, true);
+      const accented = planned.forcedAccent || cell.accents.includes(planned.originalHit);
       return {
         ...voicing,
         chord,
@@ -541,13 +590,98 @@ function chordRhythmForSection(profile: PerformanceProfile, progression: string[
   }).sort((a, b) => a.time - b.time || a.bar - b.bar);
 }
 
+function locateBassPc(pc: number, nearMidi: number): FretNote {
+  const candidates = bassTuning.flatMap((open, string) => Array.from({ length: visibleFrets + 1 }, (_, fret) => ({ midi: open + fret, string, fret })))
+    .filter((note) => mod(note.midi) === pc && note.midi <= 60)
+    .sort((a, b) => Math.abs(a.midi - nearMidi) - Math.abs(b.midi - nearMidi) || a.fret - b.fret);
+  return candidates[0] ?? { midi: 28, string: 3, fret: 0 };
+}
+
+function bassForSection(profile: PerformanceProfile, progression: string[], meterMap: MeterMap, chordRhythm: HarmonyEvent[], riff: PerformanceEvent[], complexity: number): HarmonyEvent[] {
+  let previousMidi = 40;
+  const events = chordRhythm.map((stab, index) => {
+    const { root } = parseChord(stab.chord);
+    const chordTones = chordPcs(stab.chord);
+    const simultaneous = riff.slice().sort((a, b) => Math.abs(a.time - stab.time) - Math.abs(b.time - stab.time))[0];
+    const simultaneousPc = simultaneous && Math.abs(simultaneous.time - stab.time) <= .14 ? mod(highestNote(simultaneous)?.midi ?? root) : undefined;
+    const chordHitIndex = chordRhythm.filter((event) => event.bar === stab.bar && event.time <= stab.time + .001).length - 1;
+    let targetPc = root;
+    if (simultaneousPc !== undefined && chordTones.includes(simultaneousPc) && ["melodic", "interlock", "fusion", "angular"].includes(profile.riff)) targetPc = simultaneousPc;
+    else if (chordHitIndex > 0 && profile.riff === "fusion") targetPc = chordTones[chordHitIndex % Math.min(3, chordTones.length)] ?? root;
+    else if (chordHitIndex > 0 && ["rock", "interlock", "sequence"].includes(profile.riff) && chordHitIndex % 2 === 1) targetPc = chordTones[2] ?? root;
+    const next = chordRhythm[index + 1];
+    const isLastHitInBar = !next || next.bar !== stab.bar;
+    if (isLastHitInBar && complexity >= 4 && progression[stab.bar + 1] && profile.riff !== "rock" && profile.riff !== "pedal") {
+      const nextRoot = parseChord(progression[stab.bar + 1]).root;
+      const rise = mod(nextRoot - root);
+      targetPc = mod(nextRoot + (rise > 6 ? 1 : -1));
+    }
+    const preferred = targetPc === root && chordHitIndex > 0 && profile.riff === "pedal" ? previousMidi : 40 + mod(targetPc - 4);
+    const note = locateBassPc(targetPc, preferred);
+    previousMidi = note.midi;
+    const room = next ? Math.max(.12, next.time - stab.time - .045) : Math.max(.16, meterMap.totalBeats - stab.time - .04);
+    return { chord: stab.chord, bar: stab.bar, time: stab.time, duration: Math.min(room, Math.max(.16, stab.duration * (profile.riff === "melodic" ? 1.35 : .92))), velocity: clamp(stab.velocity + .02, .5, .9), notes: [note] };
+  });
+  return events.sort((a, b) => a.time - b.time || a.bar - b.bar);
+}
+
+function drumTrackForSection(profile: PerformanceProfile, section: SectionType, meterMap: MeterMap, chordRhythm: HarmonyEvent[], riff: PerformanceEvent[], rhythmComplexity: number): PerformanceEvent[] {
+  const drums = new Map<string, PerformanceEvent>();
+  const add = (midi: number, time: number, duration: number, velocity: number) => {
+    const key = `${midi}:${Math.round(time * 32)}`;
+    const existing = drums.get(key);
+    if (!existing || existing.velocity < velocity) drums.set(key, { time, duration, velocity: clamp(velocity, .2, .98), notes: [{ midi, string: 0, fret: 0 }] });
+  };
+  const distanceTo = (time: number, times: number[]) => times.length ? Math.min(...times.map((other) => Math.abs(other - time))) : 99;
+  meterMap.meters.forEach((meter, bar) => {
+    const start = meterMap.starts[bar]; const end = start + meter.beatsPerBar;
+    const barRiff = riff.filter((event) => event.time >= start - .01 && event.time < end - .01);
+    const peak = barRiff.length ? Math.max(...barRiff.map((event) => event.velocity)) : 0;
+    const riffAccents = barRiff.filter((event) => event.velocity >= Math.max(.72, peak - .045)).map((event) => event.time);
+    const stabAccents = chordRhythm.filter((event) => event.bar === bar && event.velocity >= .72).map((event) => event.time);
+    const sharedAccents = Array.from(new Set([start, ...riffAccents, ...stabAccents].map((time) => Math.round(time * 16) / 16))).sort((a, b) => a - b);
+    const hatStep = rhythmComplexity >= 4 || ["interlock", "fusion", "sequence", "angular"].includes(profile.riff) ? .25 : .5;
+    for (let time = start; time < end - .03; time += hatStep) {
+      const shared = distanceTo(time, sharedAccents) <= .08;
+      const openHat = (profile.riff === "fusion" || profile.riff === "angular") && time + hatStep >= end - .03;
+      add(openHat ? 46 : 42, time, openHat ? .18 : .08, shared ? .78 : (Math.round((time - start) / hatStep) % 2 ? .42 : .58));
+    }
+    const kicks = sharedAccents.filter((_, index) => profile.riff !== "melodic" || index % 2 === 0);
+    if (["rock", "sequence"].includes(profile.riff) && rhythmComplexity >= 2) kicks.push(start + meter.beatsPerBar * .5);
+    kicks.forEach((time, index) => add(36, time, .1, index === 0 ? .94 : .72 + (distanceTo(time, riffAccents) <= .08 ? .1 : 0)));
+    const backbeats = meter.beatsPerBar >= 3.5 ? [start + meter.beatsPerBar * .25, start + meter.beatsPerBar * .75] : [start + meter.beatsPerBar * .5];
+    backbeats.forEach((time) => add(38, time, .11, profile.riff === "melodic" ? .68 : .84));
+    if (rhythmComplexity >= 3 && ["fusion", "angular", "interlock"].includes(profile.riff)) {
+      const ghost = sharedAccents.find((time) => distanceTo(time, backbeats) > .28 && time > start + .2);
+      if (ghost !== undefined) add(38, ghost, .07, .38);
+    }
+    if (bar === 0 && (section === "Chorus" || section === "Solo" || section === "Intro")) add(49, start, .3, section === "Chorus" ? .92 : .76);
+  });
+  return Array.from(drums.values()).sort((a, b) => a.time - b.time || a.notes[0].midi - b.notes[0].midi);
+}
+
 export function createPerformanceIdea(artist: Artist, section: SectionType, progression: string[], localCenters: number[], mode: Mode, complexity: number, rhythmComplexity = 2): PerformanceIdea {
   const profile = performanceProfiles[artist]; const meterMap = meterMapFor(profile, artist, progression.length, rhythmComplexity); const plans = makeRiffPlans(profile, artist, progression.length, section, complexity); const cursor: RiffCursor = { midi: 59 + complexity, handPosition: profile.position };
   const riff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, meterMap.starts[bar], meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor));
-  const harmony = harmonyForSection(profile, progression, meterMap, rhythmComplexity);
-  const chordRhythm = chordRhythmForSection(profile, progression, meterMap, section, riff);
+  const harmony = harmonyForSection(profile, artist, progression, meterMap, rhythmComplexity);
+  const chordRhythm = chordRhythmForSection(profile, artist, progression, meterMap, section, riff);
+  const bass = bassForSection(profile, progression, meterMap, chordRhythm, riff, complexity);
+  const drums = drumTrackForSection(profile, section, meterMap, chordRhythm, riff, rhythmComplexity);
   const tempoLift = section === "Solo" ? 8 : section === "Chorus" ? 4 : 0;
-  return { tempo: profile.tempo + tempoLift + Math.floor(Math.random() * 7) - 3, riffStyle: profile.riffLabel, meter: meterMap.meters[0], meterMap, harmony, chordRhythm, riff };
+  return { tempo: profile.tempo + tempoLift + Math.floor(Math.random() * 7) - 3, riffStyle: profile.riffLabel, meter: meterMap.meters[0], meterMap, harmony, chordRhythm, bass, drums, riff };
+}
+
+/** Adds newly introduced accompaniment lanes when an older saved Logic state
+ * is reopened, without changing its chart, riff, meter, or tempo. */
+export function completePerformanceIdea(artist: Artist, section: SectionType, progression: string[], complexity: number, rhythmComplexity: number, source: PerformanceIdea): PerformanceIdea {
+  const profile = performanceProfiles[artist];
+  const legacy = source as PerformanceIdea & { bass?: HarmonyEvent[]; drums?: PerformanceEvent[]; chordRhythm?: HarmonyEvent[] };
+  const harmony = source.harmony.map((event, index) => ({ ...event, notes: createChordPreview(event.chord, profile.position + (event.bar % 2), artist, index).notes }));
+  const savedChordRhythm = legacy.chordRhythm?.length ? legacy.chordRhythm : chordRhythmForSection(profile, artist, progression, source.meterMap, section, source.riff);
+  const chordRhythm = savedChordRhythm.map((event, index) => ({ ...event, notes: createChordPreview(event.chord, profile.position + (event.bar % 3) - 1, artist, event.bar * 7 + index, true).notes }));
+  const bass = legacy.bass?.length ? legacy.bass : bassForSection(profile, progression, source.meterMap, chordRhythm, source.riff, complexity);
+  const drums = legacy.drums?.length ? legacy.drums : drumTrackForSection(profile, section, source.meterMap, chordRhythm, source.riff, rhythmComplexity);
+  return { ...source, harmony, chordRhythm, bass, drums };
 }
 
 /** Makes a fresh lead idea while preserving the exact chart, meter map,
@@ -649,7 +783,7 @@ export function scorePerformanceIdea(artist: Artist, section: SectionType, idea:
     if (previousRhythm === barRhythms[0]) score -= 2.5;
   }
 
-  const stabs = idea.chordRhythm;
+  const stabs = idea.chordRhythm ?? [];
   const stabBars = new Set(stabs.map((event) => event.bar));
   score += stabBars.size === idea.meterMap.meters.length ? 5 : -8;
   score += Math.min(12, stabs.length) * .45;
@@ -671,11 +805,28 @@ export function scorePerformanceIdea(artist: Artist, section: SectionType, idea:
     else if (riffDistance >= Math.max(.24, beats / 14)) gapAnswers += 1;
     else if (riffDistance <= Math.max(.1, beats / 32)) ordinaryCollisions += 1;
   });
-  score += Math.min(accentLocks, idea.meterMap.meters.length * 2) * 1.25;
-  score += Math.min(gapAnswers, idea.meterMap.meters.length * 2) * (profile.riff === "melodic" ? 1.55 : 1.05);
+  score += Math.min(accentLocks, idea.meterMap.meters.length * 2) * 1.8;
+  score += Math.min(gapAnswers, idea.meterMap.meters.length * 2) * (profile.riff === "melodic" ? 1.1 : .65);
   score -= ordinaryCollisions * (profile.riff === "rock" || profile.riff === "sequence" ? .55 : 1.25);
   if (accentLocks === 0) score -= 5;
   if (gapAnswers === 0 && !["rock", "sequence"].includes(profile.riff)) score -= 3;
   if (accentLocks > 0 && gapAnswers > 0) score += 4;
+
+  const bass = idea.bass ?? [];
+  const stabTimes = stabs.map((event) => event.time);
+  const lockedBass = bass.filter((event) => nearestTimeDistance(event.time, stabs) <= .04).length;
+  score += bass.length && lockedBass === bass.length ? 6 : lockedBass * .45 - Math.max(0, bass.length - lockedBass) * 1.8;
+  bass.forEach((event) => {
+    const chord = stabs.find((stab) => stab.bar === event.bar)?.chord;
+    if (chord && event.notes.every((note) => chordPcs(chord).includes(mod(note.midi)) || event.time >= (idea.meterMap.starts[event.bar + 1] ?? idea.meterMap.totalBeats) - .4)) score += .35;
+    if (nearestTimeDistance(event.time, events) <= .14) score += .32;
+  });
+
+  const drums = idea.drums ?? [];
+  const kickTimes = drums.filter((event) => event.notes.some((note) => note.midi === 36)).map((event) => event.time);
+  const sharedAccentTimes = [...stabs.filter((event) => event.velocity >= .72).map((event) => event.time), ...events.filter((event) => event.velocity >= .74).map((event) => event.time)];
+  const coveredAccents = sharedAccentTimes.filter((time) => nearestTimeDistance(time, drums) <= .09 || kickTimes.some((kick) => Math.abs(kick - time) <= .09)).length;
+  score += Math.min(10, coveredAccents) * .42;
+  if (!drums.length || !bass.length || !stabTimes.length) score -= 12;
   return score;
 }
