@@ -37,6 +37,7 @@ public:
   void setStateInformation(const void*, int) override;
 
   void setGeneratedIdea(const juce::var& payload);
+  juce::File createDragMidiFile(const ExportOptions&) const;
   bool writeMidiFile(const juce::File&, const ExportOptions&) const;
 
 private:

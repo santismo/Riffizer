@@ -137,6 +137,19 @@ bool RiffizerMIDIFXAudioProcessor::writeMidiFile(const juce::File& destination, 
   return false;
 }
 
+juce::File RiffizerMIDIFXAudioProcessor::createDragMidiFile(const ExportOptions& options) const {
+  const auto data = std::atomic_load(&sequence);
+  if (!data || data->notes.empty()) return {};
+
+  const auto artist = data->artist.isNotEmpty() ? data->artist : "style";
+  const auto section = data->section.isNotEmpty() ? data->section : "idea";
+  const auto layout = options.multipleTracks ? "multitrack" : "single-track";
+  const auto stem = juce::File::createLegalFileName("Riffizer " + artist + " " + section + " " + layout);
+  const auto destination = juce::File::getSpecialLocation(juce::File::tempDirectory)
+    .getNonexistentChildFile(stem, ".mid", false);
+  return writeMidiFile(destination, options) ? destination : juce::File{};
+}
+
 void RiffizerMIDIFXAudioProcessor::getStateInformation(juce::MemoryBlock& state) {
   const auto current = std::atomic_load(&sequence);
   juce::ValueTree tree("RiffizerMIDIFX");

@@ -48,9 +48,10 @@ produce the Pages artifact in `dist/client`.
 
 `logic-midi-fx/` builds an Apple Audio Unit MIDI Processor with the same
 Riffizer UI and generator. It outputs generated MIDI while Logic's transport
-runs and can export either a single MIDI file or named riff, chart, and chord-
-rhythm tracks. Its export controls can route guitar strings to MIDI channels
-1–6, with optional channel inversion.
+runs. In the plug-in, **Drag MIDI → Logic** starts a native file drag with no
+save dialog: **Multi tracks** carries named riff, chord-chart, and chord-rhythm
+lanes; **Single track** merges them. Its export controls can route guitar
+strings to MIDI channels 1–6, with optional channel inversion.
 
 ```sh
 npm ci
@@ -61,9 +62,8 @@ cmake --build logic-midi-fx/build --config Release --target RiffizerMIDIFX_AU
 
 The component appears at `logic-midi-fx/build/RiffizerMIDIFX_artefacts/Release/AU/Riffizer.component`.
 Install it in `~/Library/Audio/Plug-Ins/Components`, then reopen Logic Pro.
-Logic's Audio Unit MIDI-FX API supports emitted MIDI and MIDI-file export, but
-does not let a plug-in create arrangement regions directly through a drag
-gesture. Record the plug-in's MIDI output or import the named exported file.
+Drop the generated multi-track MIDI item into Logic's Tracks area to import the
+separate named lanes. Logic controls the final tracks and region placement.
 
 ## License
 

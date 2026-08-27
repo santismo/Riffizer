@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(RiffizerMIDIFX VERSION 0.1.0)
+project(RiffizerMIDIFX VERSION 0.1.1)
 
 # Point JUCE_DIR at a checked-out JUCE 8+ source tree for an offline build.
 # Otherwise CMake fetches the released JUCE source on the first configure.
@@ -18,7 +18,7 @@ endif()
 
 juce_add_plugin(RiffizerMIDIFX
   COMPANY_NAME "Riffizer"
-  BUNDLE_ID "chatgpt.ojertrejo.riffizer-midifx"
+  BUNDLE_ID "chatgpt.ojertrejo.riffizer"
   PLUGIN_MANUFACTURER_CODE Ojrt
   PLUGIN_CODE Rfmx
   FORMATS AU Standalone

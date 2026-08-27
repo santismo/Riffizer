@@ -22,7 +22,7 @@ RiffizerMIDIFXAudioProcessorEditor::RiffizerMIDIFXAudioProcessorEditor(RiffizerM
     .withNativeIntegrationEnabled()
     .withKeepPageLoadedWhenBrowserIsHidden()
     .withEventListener("riffizerIdea", [this](juce::var payload) { ownerProcessor.setGeneratedIdea(payload); })
-    .withEventListener("riffizerExport", [this](juce::var payload) { exportFromPayload(payload); })
+    .withEventListener("riffizerExport", [this](juce::var payload) { beginMidiDragFromPayload(payload); })
     .withResourceProvider([](const juce::String& path) { return webResource(path); }, juce::WebBrowserComponent::getResourceProviderRoot());
   browser = std::make_unique<juce::WebBrowserComponent>(options);
   addAndMakeVisible(*browser);
@@ -47,16 +47,19 @@ std::optional<juce::WebBrowserComponent::Resource> RiffizerMIDIFXAudioProcessorE
   return std::nullopt;
 }
 
-void RiffizerMIDIFXAudioProcessorEditor::exportFromPayload(const juce::var& payload) {
+void RiffizerMIDIFXAudioProcessorEditor::beginMidiDragFromPayload(const juce::var& payload) {
   ownerProcessor.setGeneratedIdea(payload);
   RiffizerMIDIFXAudioProcessor::ExportOptions options;
   options.multipleTracks = truthy(payload, "multipleTracks", true);
   options.stringChannels = truthy(payload, "stringChannels", false);
   options.invertedChannels = truthy(payload, "invertedChannels", false);
-  chooser = std::make_unique<juce::FileChooser>("Export Riffizer MIDI", juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("riffizer.mid"), "*.mid");
-  chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles, [this, options](const juce::FileChooser& dialog) {
-    const auto target = dialog.getResult();
-    if (target != juce::File{}) ownerProcessor.writeMidiFile(target.withFileExtension("mid"), options);
-    chooser.reset();
-  });
+  const auto midiFile = ownerProcessor.createDragMidiFile(options);
+  if (!midiFile.existsAsFile()) return;
+
+  juce::StringArray files;
+  files.add(midiFile.getFullPathName());
+  // Keep the temporary file available after the drop: Logic can finish reading
+  // a file URL just after its drag operation completes.
+  const auto started = juce::DragAndDropContainer::performExternalDragDropOfFiles(files, false, this);
+  if (!started) midiFile.deleteFile();
 }
