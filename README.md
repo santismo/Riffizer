@@ -4,7 +4,6 @@ Riffizer is a mobile-first guitar idea generator. It creates four-bar chord
 charts and playable, original riff ideas guided by artist-inspired high-level
 composition profiles.
 
-The public Site is available at [riffizer.ojertrejo.chatgpt.site](https://riffizer.ojertrejo.chatgpt.site).
 
 ## What it does
 
