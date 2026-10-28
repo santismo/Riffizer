@@ -1,3 +1,4 @@
+import { artistBehaviors } from "./artist-behavior";
 import { chordTonesForQuality } from "./chord-tones";
 
 export const artists = ["Nick Johnston", "Moray Pringle", "Owane", "Waxamilion", "CHON", "Marco Sfogli", "Guthrie Govan", "Greg Howe", "Yngwie Malmsteen", "Matteo Mancuso"] as const;
@@ -211,7 +212,13 @@ function phraseMode(phrase: Phrase): Mode | undefined {
   return /^m(?!aj)/.test(tonic.suffix) ? "minor" : "major";
 }
 
-function choosePhrase(profile: Profile, role: PhraseRole, complexity: number, used: Set<string>, last: PlannedBar | undefined, center: number, mode: Mode) {
+function pacingFor(artist: Artist, phrase: Phrase) {
+  // A prolonged tonic/color may replace a chord, but never a required link.
+  const paces = artistBehaviors[artist].harmonicPacing.filter((slots) => phrase.chords.every((plan, i) => slots.includes(i) || !["dominant", "passing"].includes(plan.fn)));
+  return paces.length ? paces : [[0, 1, 2, 3]];
+}
+
+function choosePhrase(profile: Profile, role: PhraseRole, complexity: number, used: Set<string>, last: PlannedBar | undefined, center: number, mode: Mode, targetTension: number) {
   const available = profile.phrases.filter((phrase) => phrase.min <= complexity);
   const compatible = available.filter((phrase) => !phraseMode(phrase) || phraseMode(phrase) === mode);
   const candidates = compatible.length ? compatible : available;
@@ -222,7 +229,7 @@ function choosePhrase(profile: Profile, role: PhraseRole, complexity: number, us
     // Repetition is part of composition. A fitting hook should not be excluded
     // just because it has already appeared in the section.
     const novelty = used.has(phrase.id) ? (role === "hook" || role === "vamp" ? 1.5 : -.6) : .6;
-    const tensionFit = role === "build" || role === "turnaround" ? phrase.tension * 0.45 : (5 - phrase.tension) * 0.12;
+    const tensionFit = 1.6 - Math.abs(phrase.tension - targetTension) * .65;
     return { phrase, score: artistFit + novelty + tensionFit + voiceLeadScore(last, first) + Math.random() * 1.2 };
   });
   rated.sort((a, b) => b.score - a.score);
@@ -348,7 +355,7 @@ export function scoreProgressionCandidate(artist: Artist, section: SectionType, 
     const shared = chordTones(prior.root, prior.suffix).filter((tone) => chordTones(chord.root, chord.suffix).includes(tone)).length;
     const rootMotion = distance(prior.root, chord.root);
     score += shared * 1.15 + (rootMotion <= 2 ? 1.2 : rootMotion <= 5 ? 0.55 : -0.25);
-    if (prior.root === chord.root && prior.suffix === chord.suffix) score -= pedalFriendly ? 1.5 : 6;
+    if (prior.root === chord.root && prior.suffix === chord.suffix) score -= artistBehaviors[artist].harmonicPacing.some((slots) => new Set(slots).size < 4) ? .5 : 6;
     else if (prior.root === chord.root && !pedalFriendly) score -= 1.3;
   });
 
@@ -372,6 +379,7 @@ export function scoreProgressionCandidate(artist: Artist, section: SectionType, 
   if (section === "Solo" || section === "Bridge") score += uniqueRoots >= 3 ? 2.1 : 0;
   // Rank against this artist's harmonic vocabulary, not just generic smoothness.
   const vocabulary = engines[artist].phrases;
+  const gesturesVocabulary = vocabulary.flatMap((phrase) => [phrase.chords, ...pacingFor(artist, phrase).map((slots) => slots.map((slot) => phrase.chords[slot]))]);
   let fit = 0;
   parsed.forEach((chord, index) => {
     const offset = mod(chord.root - (generation.localCenters[index] ?? generation.center));
@@ -380,7 +388,7 @@ export function scoreProgressionCandidate(artist: Artist, section: SectionType, 
     if (index > 0 && generation.localCenters[index] === generation.localCenters[index - 1]) {
       const prior = parsed[index - 1];
       const priorOffset = mod(prior.root - (generation.localCenters[index - 1] ?? generation.center));
-      const transition = vocabulary.some((phrase) => phrase.chords.some((plan, i) => i > 0 && plan.offset === offset && plan.suffix === chord.suffix && phrase.chords[i - 1].offset === priorOffset && phrase.chords[i - 1].suffix === prior.suffix));
+      const transition = gesturesVocabulary.some((gesture) => gesture.some((plan, i) => i > 0 && plan.offset === offset && plan.suffix === chord.suffix && gesture[i - 1].offset === priorOffset && gesture[i - 1].suffix === prior.suffix));
       if (transition) fit += .75;
     }
   });
@@ -391,8 +399,8 @@ export function scoreProgressionCandidate(artist: Artist, section: SectionType, 
   for (let index = 0; index < parsed.length - 2; index += 1) {
     const center = generation.localCenters[index] ?? generation.center;
     if (generation.localCenters.slice(index, index + 3).some((value) => value !== center)) continue;
-    const match = vocabulary.some((phrase) => phrase.chords.some((_, start) => start <= phrase.chords.length - 3 && parsed.slice(index, index + 3).every((chord, step) => {
-      const plan = phrase.chords[start + step];
+    const match = gesturesVocabulary.some((gesture) => gesture.some((_, start) => start <= gesture.length - 3 && parsed.slice(index, index + 3).every((chord, step) => {
+      const plan = gesture[start + step];
       return mod(chord.root - center) === plan.offset && chord.suffix === plan.suffix;
     })));
     if (match) gestures += 1;
@@ -414,9 +422,12 @@ export function createProgression(artist: Artist, bars: number, section: Section
   for (let block = 0; block < Math.ceil(bars / 4); block += 1) {
     const arc = sectionArcs[section];
     const role = arc[Math.min(block, arc.length - 1)];
-    const phrase = choosePhrase(profile, role, complexity, used, last, localCenter, mode);
+    const behavior = artistBehaviors[artist];
+    const targetTension = Math.min(complexity, behavior.tensionArc[block % behavior.tensionArc.length] + (section === "Bridge" || section === "Solo" ? 1 : 0));
+    const phrase = choosePhrase(profile, role, complexity, used, last, localCenter, mode, targetTension);
     if (block === 0) mode = phraseMode(phrase) ?? mode;
-    const phraseBars = phrase.chords.map((plan) => ({ center: localCenter, plan, phraseId: phrase.id }));
+    const slots = section === "Pre-chorus" || section === "Solo" ? [0, 1, 2, 3] : choose(pacingFor(artist, phrase));
+    const phraseBars = slots.map((slot) => ({ center: localCenter, plan: phrase.chords[slot], phraseId: phrase.id }));
     blocks.push(phraseBars);
     last = phraseBars[phraseBars.length - 1];
   }

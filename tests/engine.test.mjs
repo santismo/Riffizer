@@ -8,10 +8,14 @@ import { execFileSync } from "node:child_process";
 
 const require = createRequire(import.meta.url);
 const output = mkdtempSync(join(tmpdir(), "riffizer-engine-"));
-execFileSync(process.execPath, [require.resolve("typescript/bin/tsc"), "app/harmonic-engine.ts", "app/performance-engine.ts", "--target", "es2023", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", output]);
+execFileSync(process.execPath, [require.resolve("typescript/bin/tsc"), "app/harmonic-engine.ts", "app/performance-engine.ts", "app/midi-export.ts", "app/sample-audition-engine.ts", "--target", "es2023", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", output]);
 after(() => rmSync(output, { recursive: true, force: true }));
 const { artists, createProgression, scoreProgressionCandidate } = require(join(output, "harmonic-engine.js"));
 const { createChordPreview, createPerformanceIdea, regenerateRiffIdea, completePerformanceIdea, scorePerformanceIdea, scorePhraseIntelligence } = require(join(output, "performance-engine.js"));
+const { artistBehaviors } = require(join(output, "artist-behavior.js"));
+const { applyGuitarExpression, pitchGesturePoints } = require(join(output, "guitar-expression.js"));
+const { createMidiBytes, MIDI_TICKS_PER_BEAT } = require(join(output, "midi-export.js"));
+const { SampleAuditionEngine } = require(join(output, "sample-audition-engine.js"));
 const { chordTonesForQuality } = require(join(output, "chord-tones.js"));
 
 function seeded(seed, run) {
@@ -19,6 +23,165 @@ function seeded(seed, run) {
   Math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
   try { return run(); } finally { Math.random = original; }
 }
+
+test("artist decisions produce distinct phrasing and harmony on a seeded corpus", () => {
+  const signatures = new Set(); const holds = {};
+  for (const artist of artists) {
+    const lines = []; holds[artist] = 0;
+    for (let seed = 1; seed <= 24; seed++) seeded(seed, () => {
+      const h = createProgression(artist, 8, "Verse", 3, 0);
+      holds[artist] += h.progression.filter((chord, i) => i && chord === h.progression[i - 1]).length;
+      const idea = createPerformanceIdea(artist, "Verse", ["Cmaj9", "Am7", "Fmaj7", "G7"], [0, 0, 0, 0], "major", 3, 0);
+      verify(idea, `${artist} corpus ${seed}`);
+      lines.push(idea.riff.map((e) => [e.time, e.notes.at(0).midi, e.velocity, e.expression]));
+      const topNotes = idea.riff.map((e) => Math.max(...e.notes.map((n) => n.midi)));
+      const [low, high] = artistBehaviors[artist].register;
+      assert.ok(topNotes.filter((n) => n >= low && n <= high).length / topNotes.length > .9, artist);
+    });
+    signatures.add(JSON.stringify(lines));
+  }
+  assert.equal(signatures.size, 10);
+  assert.ok(holds["Nick Johnston"] > holds["Greg Howe"], JSON.stringify(holds));
+  assert.ok(holds.Waxamilion > holds["Yngwie Malmsteen"], JSON.stringify(holds));
+});
+
+test("expression biases differ while connections, sustained endings, and polyphony remain safe", () => {
+  const meter = { starts: [0], meters: [{ label: "4/4", beatsPerBar: 4 }], totalBeats: 4 };
+  const harmony = [{ time: 0, chord: "Cmaj7" }];
+  const make = (time, duration, midi, string, fret) => ({ time, duration, velocity: .8, notes: [{ midi, string, fret }] });
+  const fixtures = [
+    [make(0, 2, 67, 0, 3)],
+    [make(0, .49, 64, 2, 9), make(.5, .49, 65, 2, 10)],
+    [make(0, .49, 64, 2, 9), make(.5, .49, 67, 2, 12)],
+    [make(0, .5, 60, 3, 10), make(3, 1, 64, 2, 9)],
+  ];
+  const counts = {};
+  for (const artist of artists) {
+    const count = counts[artist] = { bend: 0, slide: 0, legato: 0, "palm-mute": 0, vibrato: 0 };
+    for (let seed = 1; seed <= 200; seed++) seeded(seed * 719, () => {
+      for (const source of fixtures) {
+        const before = JSON.stringify(source);
+        const result = applyGuitarExpression(artist, source, harmony, meter);
+        assert.equal(JSON.stringify(source), before, "does not mutate a saved line");
+        result.forEach((event) => {
+          if (event.expression?.technique in count) count[event.expression.technique]++;
+          if (event.expression?.vibrato) count.vibrato++;
+        });
+        assert.notEqual(result.at(-1).expression?.technique, "palm-mute", "preserves ending");
+      }
+    });
+  }
+  assert.ok(counts["Marco Sfogli"].bend > counts.CHON.bend * 5);
+  assert.ok(counts["Greg Howe"].legato > counts["Yngwie Malmsteen"].legato * 1.5);
+  assert.ok(counts.Waxamilion["palm-mute"] > counts["Matteo Mancuso"]["palm-mute"] * 3);
+  assert.ok(counts["Yngwie Malmsteen"].vibrato > counts.CHON.vibrato * 3);
+  const poly = { ...make(0, 2, 67, 0, 3), notes: [{ midi: 67, string: 0, fret: 3 }, { midi: 64, string: 1, fret: 5 }] };
+  assert.equal(applyGuitarExpression("Marco Sfogli", [poly], harmony, meter)[0].expression, undefined);
+});
+
+test("pitch gestures settle on target, delay vibrato, and stay within bounds", () => {
+  const expression = { technique: "bend", fromMidi: 65, vibrato: { depthCents: 32, rateHz: 5.4, delayBeats: .65 } };
+  const points = pitchGesturePoints(67, 1.4, .5, expression);
+  assert.equal(points[0].cents, -200);
+  assert.equal(points.at(-1).cents, 0);
+  assert.ok(points.every((p, i) => Number.isFinite(p.cents) && Math.abs(p.cents) <= 200 && (!i || p.time > points[i - 1].time)));
+  assert.ok(points.filter((p) => p.time >= .16 && p.time < .325).every((p) => p.cents === 0));
+  assert.ok(points.some((p) => p.time > .5 && p.cents > 10));
+  assert.ok(points.some((p) => p.time > .5 && p.cents < -10));
+  assert.deepEqual(pitchGesturePoints(67, 1, .5, { technique: "legato" }), []);
+  assert.deepEqual(pitchGesturePoints(67, 1, .5), []);
+});
+
+function parseMidi(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  assert.equal(new TextDecoder().decode(bytes.slice(0, 4)), "MThd");
+  assert.equal(view.getUint16(12), MIDI_TICKS_PER_BEAT);
+  let offset = 14;
+  const readVlq = () => { let value = 0, byte; do { byte = bytes[offset++]; value = value * 128 + (byte & 127); } while (byte & 128); return value; };
+  return Array.from({ length: view.getUint16(10) }, () => {
+    assert.equal(new TextDecoder().decode(bytes.slice(offset, offset + 4)), "MTrk");
+    const end = offset + 8 + view.getUint32(offset + 4); offset += 8;
+    const events = []; let tick = 0;
+    while (offset < end) {
+      tick += readVlq(); const status = bytes[offset++];
+      if (status === 255) {
+        const type = bytes[offset++], length = readVlq();
+        events.push({ tick, status, type, data: Array.from(bytes.slice(offset, offset + length)) }); offset += length;
+      } else events.push({ tick, status, data: [bytes[offset++], bytes[offset++]] });
+    }
+    assert.equal(offset, end);
+    return events;
+  });
+}
+
+test("MIDI preserves notes and meters, isolates pitch, and resets before adjacent gestures", () => seeded(51, () => {
+  const idea = createPerformanceIdea("Marco Sfogli", "Verse", ["Cmaj7", "Am7", "Fmaj7", "G7"], [0, 0, 0, 0], "major", 3, 4);
+  idea.riff = [
+    { time: 0, duration: 1, velocity: .8, notes: [{ midi: 67, string: 0, fret: 3 }], expression: { technique: "bend", fromMidi: 65 } },
+    { time: 1, duration: 1, velocity: .8, notes: [{ midi: 69, string: 0, fret: 5 }], expression: { technique: "slide", fromMidi: 67 } },
+  ];
+  const title = "Long UTF-8 title · ".repeat(15);
+  const tracks = parseMidi(createMidiBytes(idea, title, "Cmaj7"));
+  assert.equal(tracks.length, 5);
+  const channels = [0, 1, 2, 3, 9];
+  const lanes = [idea.riff, idea.harmony, idea.chordRhythm, idea.bass, idea.drums];
+  tracks.forEach((track, i) => {
+    assert.ok(new TextDecoder().decode(Uint8Array.from(track[0].data)).startsWith(title));
+    const notes = track.filter((e) => (e.status & 240) === 144);
+    assert.equal(notes.length, lanes[i].reduce((sum, e) => sum + e.notes.length, 0));
+    assert.ok(track.filter((e) => e.status !== 255).every((e) => (e.status & 15) === channels[i]));
+    if (i) assert.equal(track.filter((e) => (e.status & 240) === 224).length, 0);
+    const balance = new Map();
+    track.filter((e) => [128, 144].includes(e.status & 240)).forEach((e) => balance.set(e.data[0], (balance.get(e.data[0]) ?? 0) + ((e.status & 240) === 144 ? 1 : -1)));
+    assert.ok([...balance.values()].every((n) => n === 0));
+    assert.equal(track.filter((e) => e.type === 88).length, idea.meterMap.meters.length);
+    assert.equal(track.at(-1).type, 47);
+    assert.ok(track.at(-1).tick >= Math.round(idea.meterMap.totalBeats * MIDI_TICKS_PER_BEAT));
+  });
+  const lead = tracks[0];
+  assert.deepEqual(lead.filter((e) => e.status === 176).map((e) => e.data), [[101, 0], [100, 0], [6, 12], [38, 0], [101, 127], [100, 127]]);
+  const boundary = lead.filter((e) => e.tick === MIDI_TICKS_PER_BEAT && e.status !== 255);
+  assert.deepEqual(boundary.map((e) => e.status), [128, 224, 224, 144]);
+  assert.deepEqual(boundary[1].data, [0, 64]);
+  assert.ok(boundary[2].data[1] < 64);
+  const expected = pitchGesturePoints(67, 60 / idea.tempo, 60 / idea.tempo, idea.riff[0].expression);
+  expected.slice(0, -1).forEach((point) => {
+    const tick = Math.round(point.time * idea.tempo / 60 * MIDI_TICKS_PER_BEAT);
+    const event = lead.findLast((e) => e.tick === tick && e.status === 224);
+    assert.equal(event.data[0] + event.data[1] * 128, Math.round(8192 + point.cents / 1200 * 8192));
+  });
+  idea.riff[1].time = .5;
+  assert.equal(parseMidi(createMidiBytes(idea, "Overlap", "C"))[0].filter((e) => e.status === 224).length, 0);
+}));
+
+test("sample preview schedules expression and cleanup with a silent AudioContext mock", async () => {
+  const nodes = [];
+  const param = () => ({ value: 0, calls: [], setValueAtTime(...args) { this.calls.push(["set", ...args]); }, linearRampToValueAtTime(...args) { this.calls.push(["linear", ...args]); }, exponentialRampToValueAtTime(...args) { this.calls.push(["exponential", ...args]); } });
+  const node = (kind) => { const n = { kind, gain: param(), detune: param(), playbackRate: param(), frequency: param(), Q: param(), connect(to) { return to; }, disconnect() { this.disconnected = true; }, start(...args) { this.started = args; }, stop(...args) { this.stopped = args; } }; nodes.push(n); return n; };
+  const context = { currentTime: 2, destination: {}, createGain: () => node("gain"), createBufferSource: () => node("source"), createBiquadFilter: () => node("filter"), decodeAudioData: async () => ({ duration: 3 }) };
+  const originalFetch = globalThis.fetch, originalDocument = globalThis.document;
+  globalThis.document = { baseURI: "https://example.test/Riffizer/" };
+  globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+  try {
+    const engine = new SampleAuditionEngine(context);
+    await engine.load(["electric"]);
+    engine.playPitched("electric", 67, 3, 1, .8, .2, { technique: "bend", fromMidi: 65 }, .5);
+    const bent = nodes.find((n) => n.kind === "source");
+    assert.deepEqual(bent.detune.calls[0], ["set", -200, 3]);
+    assert.deepEqual(bent.detune.calls.at(-1), ["linear", 0, 4]);
+    assert.deepEqual(bent.started, [3, 0]);
+    bent.onended(); assert.ok(bent.disconnected);
+    engine.playPitched("electric", 65, 4, .25, .8, .2, { technique: "legato" }, .5);
+    assert.deepEqual(nodes.findLast((n) => n.kind === "source").started, [4, .025]);
+    engine.playPitched("electric", 60, 5, .1, .8, .2, { technique: "palm-mute" }, .5);
+    const filter = nodes.find((n) => n.kind === "filter"), muted = nodes.findLast((n) => n.kind === "source");
+    assert.equal(filter.type, "lowpass"); assert.deepEqual(filter.frequency.calls[0], ["set", 1050, 5]);
+    assert.equal(muted.detune.calls.length, 0);
+    engine.stopAll(); assert.deepEqual(muted.stopped, []);
+    muted.onended(); assert.ok(filter.disconnected);
+    engine.dispose(); assert.ok(nodes[0].disconnected);
+  } finally { globalThis.fetch = originalFetch; if (originalDocument === undefined) delete globalThis.document; else globalThis.document = originalDocument; }
+});
 const pc = (midi) => ((midi % 12) + 12) % 12;
 const pitchClasses = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 function tones(chord) {
@@ -38,6 +201,24 @@ function verify(idea, context) {
   }
   idea.riff.forEach((event, i) => {
     assert.ok(event.time + event.duration <= (idea.riff[i + 1]?.time ?? idea.meterMap.totalBeats) + .00001, `overlap: ${context}`);
+    if (event.expression) {
+      assert.equal(event.notes.length, 1, context);
+      const note = event.notes[0], previous = idea.riff[i - 1];
+      if (["slide", "legato"].includes(event.expression.technique)) {
+        assert.equal(previous.notes.length, 1, context);
+        assert.equal(previous.notes[0].string, note.string, context);
+        assert.ok(previous.notes[0].fret > 0 && note.fret > 0, context);
+        assert.ok(event.time - previous.time - previous.duration <= .12001, context);
+        assert.ok(Math.abs(note.midi - previous.notes[0].midi) <= (event.expression.technique === "slide" ? 5 : 4), context);
+      }
+      if (event.expression.technique === "bend") {
+        assert.ok(note.string <= 2 && event.expression.fromMidi >= tuning[note.string] + 1, context);
+        assert.ok([1, 2].includes(note.midi - event.expression.fromMidi), context);
+      }
+      if (event.expression.vibrato || event.expression.technique === "bend") {
+        assert.ok(tones(idea.harmony.findLast((h) => h.time <= event.time + 1e-6).chord).includes(pc(note.midi)), context);
+      }
+    }
     const strings = event.notes.map((n) => n.string).sort((a, b) => a - b);
     assert.ok(strings.every((s, j) => !j || s === strings[j - 1] + 1), `strings: ${context}`);
     for (const note of event.notes) {

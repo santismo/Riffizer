@@ -1,3 +1,5 @@
+import { pitchGesturePoints, type GuitarExpression } from "./guitar-expression";
+
 export type GuitarSampleTone = "electric" | "acoustic" | "nylon";
 export type SampleInstrument = GuitarSampleTone | "bass" | "drums";
 
@@ -123,7 +125,7 @@ export class SampleAuditionEngine {
     }));
   }
 
-  playPitched(instrument: Exclude<SampleInstrument, "drums">, midi: number, time: number, duration: number, velocity: number, level = 1) {
+  playPitched(instrument: Exclude<SampleInstrument, "drums">, midi: number, time: number, duration: number, velocity: number, level = 1, expression?: GuitarExpression, secondsPerBeat = 1) {
     const samples = pitchedSamples[instrument]
       .map((sample) => ({ ...sample, buffer: this.loaded.get(sample.file) }))
       .filter((sample): sample is LoadedSample => Boolean(sample.buffer));
@@ -131,20 +133,34 @@ export class SampleAuditionEngine {
     const sample = nearestSample(samples, midi);
     const start = Math.max(this.context.currentTime + 0.004, time);
     const length = Math.max(0.01, duration);
-    const release = Math.min(0.09, length * 0.15);
+    const muted = expression?.technique === "palm-mute";
+    const legato = expression?.technique === "legato";
+    const release = Math.min(muted ? .035 : .09, length * .15);
     const source = this.context.createBufferSource();
     const envelope = this.context.createGain();
     source.buffer = sample.buffer;
     source.playbackRate.setValueAtTime(2 ** ((midi - sample.midi) / 12), start);
-    const peak = Math.max(0.012, Math.min(0.42, velocity * level));
+    const points = pitchGesturePoints(midi, length, secondsPerBeat, expression);
+    points.forEach((point, index) => {
+      if (index === 0) source.detune.setValueAtTime(point.cents, start);
+      else source.detune.linearRampToValueAtTime(point.cents, start + point.time);
+    });
+    const peak = Math.max(0.012, Math.min(0.42, velocity * level * (muted ? .75 : legato ? .88 : 1)));
     envelope.gain.setValueAtTime(0.0001, start);
-    envelope.gain.linearRampToValueAtTime(peak, start + 0.006);
-    envelope.gain.linearRampToValueAtTime(peak * 0.72, Math.max(start + 0.006, start + length - release));
+    envelope.gain.linearRampToValueAtTime(peak, start + Math.min(length * .3, legato ? .022 : .006));
+    envelope.gain.linearRampToValueAtTime(peak * 0.72, Math.max(start + Math.min(length * .3, legato ? .022 : .006), start + length - release));
     envelope.gain.exponentialRampToValueAtTime(0.0001, start + length);
-    source.connect(envelope).connect(this.output);
-    source.onended = () => this.active.delete(source);
+    if (muted) {
+      const filter = this.context.createBiquadFilter();
+      filter.type = "lowpass"; filter.frequency.setValueAtTime(1050, start); filter.Q.value = .5;
+      source.connect(filter).connect(envelope).connect(this.output);
+      source.onended = () => { this.active.delete(source); source.disconnect(); filter.disconnect(); envelope.disconnect(); };
+    } else {
+      source.connect(envelope).connect(this.output);
+      source.onended = () => { this.active.delete(source); source.disconnect(); envelope.disconnect(); };
+    }
     this.active.add(source);
-    source.start(start);
+    source.start(start, legato ? .025 : 0);
     source.stop(start + length + 0.04);
   }
 

@@ -1,9 +1,11 @@
+import { artistBehaviors, type PhraseMotion } from "./artist-behavior";
+import { applyGuitarExpression, type GuitarExpression } from "./guitar-expression";
 import { phrasingProfiles, type RhythmCell } from "./phrasing-profiles";
 import { chordTonesForQuality } from "./chord-tones";
 import { pitchClasses, type Artist, type Mode, type SectionType } from "./harmonic-engine";
 
 export type FretNote = { midi: number; string: number; fret: number };
-export type PerformanceEvent = { time: number; duration: number; notes: FretNote[]; velocity: number };
+export type PerformanceEvent = { time: number; duration: number; notes: FretNote[]; velocity: number; expression?: GuitarExpression };
 export type TimeSignature = { label: string; beatsPerBar: number };
 export type MeterMap = { meters: TimeSignature[]; starts: number[]; totalBeats: number };
 export type HarmonyEvent = PerformanceEvent & { chord: string; bar: number };
@@ -35,7 +37,6 @@ type PlayingComfort = {
   pedalFriendly?: boolean;
 };
 type PerformanceProfile = { riff: RiffKind; riffLabel: string; tempo: number; position: number; meters: TimeSignature[]; chordFeel: HarmonicPhrasing; gripReach: number; texture: TexturePolicy; comfort: PlayingComfort };
-type PhraseMotion = "statement" | "answer" | "development" | "arrival";
 type ArtistMotif = { accentTones: number[]; pickup: number; pedalEvery?: number; meterWeights: Record<string, number> };
 type RiffBarPlan = RhythmCell & { variation: number; phraseMotion: PhraseMotion; contour: number[] };
 type ChordRhythmCell = { id: string; hits: number[]; lengths: number[]; accents: number[]; finalHold?: boolean };
@@ -264,9 +265,10 @@ function compactFragment(anchor: FretNote, lowerVoicings: number[][], desiredSiz
   return best ?? { notes: [anchor], center: anchor.fret };
 }
 
-function playableFragmentFor(profile: PerformanceProfile, targetPc: number, nearMidi: number, requestedSize: 1 | 2 | 3, lowerVoicings: number[][], cursor: RiffCursor) {
-  const anchors = leadCandidatesForPc(targetPc, nearMidi, cursor.handPosition, profile.comfort, cursor.anchor)
-    .filter((anchor) => requestedSize === 1 || anchor.string <= guitarTuning.length - requestedSize)
+function playableFragmentFor(profile: PerformanceProfile, targetPc: number, nearMidi: number, requestedSize: 1 | 2 | 3, lowerVoicings: number[][], cursor: RiffCursor, register: [number, number] = [52, 82]) {
+  const candidates = leadCandidatesForPc(targetPc, nearMidi, cursor.handPosition, profile.comfort, cursor.anchor)
+    .filter((anchor) => anchor.midi >= register[0] && anchor.midi <= register[1]);
+  const anchors = candidates.filter((anchor) => requestedSize === 1 || anchor.string <= guitarTuning.length - requestedSize)
     .slice(0, requestedSize === 1 ? 5 : 9);
   let best: PlayableFragment | null = null;
   for (const anchor of anchors) {
@@ -274,6 +276,9 @@ function playableFragmentFor(profile: PerformanceProfile, targetPc: number, near
     const fragment = requestedSize === 1 ? { notes: [anchor], center: anchor.fret } : compactFragment(anchor, lowerVoicings, requestedSize as 2 | 3, context);
     const notes = fragment.notes;
     const lead = notes.reduce((highest, note) => note.midi > highest.midi ? note : highest, notes[0]);
+    // A compact grip can relocate the anchor by an octave. Keep its melody
+    // within the profile's register, falling back to a single note if needed.
+    if (lead.midi < register[0] || lead.midi > register[1]) continue;
     const frets = notes.map((note) => note.fret);
     const span = Math.max(...frets) - Math.min(...frets);
     const shift = cursor.gripCenter === undefined ? Math.abs(fragment.center - cursor.handPosition) : Math.abs(fragment.center - cursor.gripCenter);
@@ -281,7 +286,8 @@ function playableFragmentFor(profile: PerformanceProfile, targetPc: number, near
     const score = Math.abs(requestedSize - notes.length) * 14 + span * 3 + shift + Math.max(0, shift - profile.comfort.maxShift) * 6 + Math.max(0, travel - profile.comfort.maxStringTravel) * 5 + Math.abs(lead.midi - nearMidi) * 0.18;
     if (!best || score < best.score) best = { notes, center: fragment.center, anchor: lead, score };
   }
-  return best ?? { notes: [locateLeadPc(targetPc, nearMidi, cursor.handPosition, profile.comfort, cursor.anchor)], center: cursor.handPosition, anchor: locateLeadPc(targetPc, nearMidi, cursor.handPosition, profile.comfort, cursor.anchor), score: 99 };
+  const fallback = candidates[0] ?? locateLeadPc(targetPc, nearMidi, cursor.handPosition, profile.comfort, cursor.anchor);
+  return best ?? { notes: [fallback], center: fallback.fret, anchor: fallback, score: 99 };
 }
 
 function scaleFor(center: number, mode: Mode, artist: Artist) {
@@ -293,11 +299,11 @@ function scaleFor(center: number, mode: Mode, artist: Artist) {
   return scale.map((interval) => mod(center + interval));
 }
 
-function phraseMotionFor(bar: number, bars: number, section: SectionType): PhraseMotion {
+function phraseMotionFor(bar: number, bars: number, section: SectionType, artist: Artist): PhraseMotion {
   if (bar === bars - 1) return "arrival";
   if (bar === 0) return "statement";
   if (section === "Chorus" && bar % 2 === 0) return "statement";
-  return bar % 2 ? "answer" : "development";
+  return artistBehaviors[artist].phraseCycle[bar % artistBehaviors[artist].phraseCycle.length];
 }
 
 function shapeCell(cell: RhythmCell, motion: PhraseMotion, pickup: number, holdBeats: number): RhythmCell {
@@ -323,13 +329,19 @@ function makeRiffPlans(profile: PerformanceProfile, artist: Artist, bars: number
   const variation = Math.floor(Math.random() * 8) + complexity;
   const plans: RiffBarPlan[] = [];
   for (let bar = 0; bar < bars; bar += 1) {
-    const phraseMotion = phraseMotionFor(bar, bars, section);
-    // Recall a recognizable idea every two bars, with a changed ending as it develops.
-    const recall = bar % 2 === 0;
+    const phraseMotion = phraseMotionFor(bar, bars, section, artist);
+    // Recall a recognizable idea at the profile's preferred interval.
+    const behavior = artistBehaviors[artist];
+    const recall = bar % behavior.recallEvery === 0;
     const alternatives = cells.filter((cell) => cell.id !== plans.at(-1)?.id);
     const selected = recall ? statement : choose(alternatives.length ? alternatives : cells);
     const contour = motif.map((degree, i) => {
-      if (phraseMotion === "answer" && i > 1) return -Math.round(degree * .65);
+      if (phraseMotion === "answer" && i > 1) {
+        if (behavior.answer === "sequence") return degree - 1;
+        if (behavior.answer === "displace") return motif[(i + 1) % motif.length];
+        if (behavior.answer === "contrast") return -degree;
+        return Math.round(degree * .5);
+      }
       if (phraseMotion === "development" && i > 2) return degree + (bar % 4 === 2 ? 1 : -1);
       return degree;
     });
@@ -413,6 +425,7 @@ function scaleForChord(chord: string, regionalScale: number[]) {
 
 function riffForBar(profile: PerformanceProfile, artist: Artist, section: SectionType, chord: string, center: number, mode: Mode, bar: number, barStart: number, barBeats: number, complexity: number, plan: RiffBarPlan, cursor: RiffCursor, harmony: HarmonyEvent[]) {
   const phrasing = phrasingProfiles[artist];
+  const behavior = artistBehaviors[artist];
   const sourceIndexes = (section === "Intro" || section === "Outro") ? plan.times.map((_, index) => index).filter((index) => index % 2 === 0 || index === plan.times.length - 1) : plan.times.map((_, index) => index);
   const hitIndexes = complexity === 1 ? sourceIndexes.filter((_, index) => index % 2 === 0 || index === sourceIndexes.length - 1) : sourceIndexes;
   const texture: TextureState = { singles: 0, dyads: 0, triads: 0, lastSize: 1 };
@@ -433,7 +446,7 @@ function riffForBar(profile: PerformanceProfile, artist: Artist, section: Sectio
     const connected = room <= .55 && phrasing.gate >= .8;
     const duration = Math.max(.06, Math.min(room - .015, sustain ? room * .97 : connected ? room * phrasing.gate : writtenLength * phrasing.gate));
     const accent = plan.accents.includes(sourceIndex) || phraseIndex === 0 || last
-      || Math.abs((time - barStart) % 1) < .01 || duration >= .65;
+      || behavior.accents.some((beat) => Math.abs(plan.times[sourceIndex] - beat) < .1) || duration >= .65;
     const degree = plan.contour[phraseIndex % plan.contour.length];
     const scale = scaleForChord(activeChord, baseScale);
     const anchorIndex = scale.indexOf(nearestPc(scale, openingPc));
@@ -449,7 +462,7 @@ function riffForBar(profile: PerformanceProfile, artist: Artist, section: Sectio
     let pc = accent ? nearestPc(stableTones, desired) : desired;
     if (pedal && phraseIndex % pedal === 0 && stableTones.includes(tones[0])) pc = tones[0];
     else if (!accent && complexity >= 3 && Math.random() < phrasing.arpeggio) pc = tones[mod(phraseIndex + plan.variation, tones.length)];
-    if (last && plan.phraseMotion === "arrival") pc = nearestPc(stableTones, tones[section === "Pre-chorus" ? 1 : 0]);
+    if (last && plan.phraseMotion === "arrival") pc = nearestPc(stableTones, tones[section === "Pre-chorus" ? 1 : behavior.landing[plan.variation % behavior.landing.length]]);
     return { time, pc, tones, accent, last, sourceIndex, duration };
   });
   if (complexity >= 3) targets.forEach((target, i) => {
@@ -476,9 +489,9 @@ function riffForBar(profile: PerformanceProfile, artist: Artist, section: Sectio
     const room = nextTime - time;
     // Fast passages stay monophonic; a grip on every accent interrupts a line.
     const requestedSize = room < .4 || !tones.includes(pc) ? 1 : textureSizeFor(profile, plan, bar, phraseIndex, targets.length - phraseIndex - 1, complexity, accent, texture);
-    let fragment = playableFragmentFor(profile, pc, targetMidi, requestedSize, voicingsFor(profile, artist, root, third, fifth, color), cursor);
+    let fragment = playableFragmentFor(profile, pc, targetMidi, requestedSize, voicingsFor(profile, artist, root, third, fifth, color), cursor, behavior.register);
     if ((fragment.notes.length === 2 && texture.dyads >= profile.texture.maxDyads) || (fragment.notes.length === 3 && texture.triads >= profile.texture.maxTriads)) {
-      fragment = playableFragmentFor(profile, pc, targetMidi, 1, [], cursor);
+      fragment = playableFragmentFor(profile, pc, targetMidi, 1, [], cursor, behavior.register);
     }
     recordTexture(texture, fragment.notes.length);
     cursor.midi = fragment.anchor.midi; cursor.anchor = fragment.anchor;
@@ -765,9 +778,10 @@ function drumTrackForSection(profile: PerformanceProfile, section: SectionType, 
 }
 
 export function createPerformanceIdea(artist: Artist, section: SectionType, progression: string[], localCenters: number[], mode: Mode, complexity: number, rhythmComplexity = 2): PerformanceIdea {
-  const profile = performanceProfiles[artist]; const meterMap = meterMapFor(profile, artist, progression.length, rhythmComplexity); const plans = makeRiffPlans(profile, artist, progression.length, section, complexity); const cursor: RiffCursor = { midi: 59 + complexity, handPosition: profile.position };
+  const profile = performanceProfiles[artist]; const meterMap = meterMapFor(profile, artist, progression.length, rhythmComplexity); const plans = makeRiffPlans(profile, artist, progression.length, section, complexity); const cursor: RiffCursor = { midi: artistBehaviors[artist].register[0] + 4, handPosition: profile.position };
   const harmony = harmonyForSection(profile, artist, progression, meterMap, rhythmComplexity);
-  const riff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, meterMap.starts[bar], meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor, harmony));
+  const rawRiff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, meterMap.starts[bar], meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor, harmony));
+  const riff = applyGuitarExpression(artist, rawRiff, harmony, meterMap);
   const chordRhythm = chordRhythmForSection(profile, artist, progression, meterMap, section, riff, harmony);
   const bass = bassForSection(profile, meterMap, chordRhythm, riff, complexity, harmony);
   const drums = drumTrackForSection(profile, section, meterMap, chordRhythm, riff, rhythmComplexity);
@@ -803,8 +817,9 @@ export function completePerformanceIdea(artist: Artist, section: SectionType, pr
  * sustained harmony, chord-stab lane, and tempo of the source idea. */
 export function regenerateRiffIdea(artist: Artist, section: SectionType, progression: string[], localCenters: number[], mode: Mode, complexity: number, source: PerformanceIdea): PerformanceIdea {
   const profile = performanceProfiles[artist]; const plans = makeRiffPlans(profile, artist, progression.length, section, complexity);
-  const cursor: RiffCursor = { midi: 59 + complexity, handPosition: profile.position };
-  const riff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, source.meterMap.starts[bar], source.meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor, source.harmony));
+  const cursor: RiffCursor = { midi: artistBehaviors[artist].register[0] + 4, handPosition: profile.position };
+  const rawRiff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, source.meterMap.starts[bar], source.meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor, source.harmony));
+  const riff = applyGuitarExpression(artist, rawRiff, source.harmony, source.meterMap);
   return { ...source, riffStyle: profile.riffLabel, riff };
 }
 

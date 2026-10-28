@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { artists, createProgression, flatNames, keyLabel, profiles, scoreProgressionCandidate, sharpNames, type Artist, type HarmonicState, type SectionType } from "./harmonic-engine";
 import { completePerformanceIdea, createChordPreview, createPerformanceIdea, regenerateRiffIdea, scorePerformanceIdea, type PerformanceEvent, type PerformanceIdea } from "./performance-engine";
 import { prefetchSampleAssets, SampleAuditionEngine, type GuitarSampleTone, type SampleInstrument } from "./sample-audition-engine";
+import { artistBehaviors } from "./artist-behavior";
+import { expressionLabel } from "./guitar-expression";
+import { createMidiBytes } from "./midi-export";
 
 type Part = HarmonicState & { id: number; artist: Artist; section: SectionType; bars: number; progression: string[]; localCenters: number[]; idea: PerformanceIdea };
 type ActiveStep = { key: string; index: number };
@@ -70,42 +73,9 @@ function pillSliderStyle(value: number, min: number, max: number, accent: string
   return { "--range-fill": `${((value - min) / (max - min)) * 100}%`, "--range-accent": accent } as CSSProperties;
 }
 
-function vlq(value: number) { const bytes = [value & 0x7f]; while ((value >>= 7)) bytes.unshift((value & 0x7f) | 0x80); return bytes; }
-function u32(value: number) { return [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255]; }
-
-function midiTrack(events: PerformanceEvent[], name: string, tempo: number, meterMap: PerformanceIdea["meterMap"], channel = 1) {
-  const ticksPerBeat = 96; const text = Array.from(new TextEncoder().encode(name)); const micros = Math.round(60000000 / tempo);
-  const noteOn = 0x90 | (channel - 1); const noteOff = 0x80 | (channel - 1);
-  const messages: { tick: number; order: number; bytes: number[] }[] = [
-    { tick: 0, order: 0, bytes: [0xff, 0x03, text.length, ...text] },
-    { tick: 0, order: 1, bytes: [0xff, 0x51, 0x03, (micros >>> 16) & 255, (micros >>> 8) & 255, micros & 255] },
-    ...meterMap.meters.map((meter, bar) => {
-      const [numerator, denominator] = meter.label.split("/").map(Number); const denominatorPower = denominator === 8 ? 3 : 2;
-      return { tick: Math.round(meterMap.starts[bar] * ticksPerBeat), order: 2, bytes: [0xff, 0x58, 0x04, numerator, denominatorPower, 24, 8] };
-    }),
-    ...events.flatMap((event) => event.notes.flatMap((note) => [
-      { tick: Math.round(event.time * ticksPerBeat), order: 4, bytes: [noteOn, note.midi, Math.round(event.velocity * 96)] },
-      { tick: Math.round((event.time + event.duration) * ticksPerBeat), order: 3, bytes: [noteOff, note.midi, 0] },
-    ])),
-  ].sort((a, b) => a.tick - b.tick || a.order - b.order);
-  const track: number[] = []; let previous = 0;
-  messages.forEach((message) => { track.push(...vlq(message.tick - previous), ...message.bytes); previous = message.tick; });
-  track.push(0, 0xff, 0x2f, 0);
-  return [...Array.from(new TextEncoder().encode("MTrk")), ...u32(track.length), ...track];
-}
-
 function downloadMidi(part: Part) {
   const style = profileStyles[part.artist].label;
-  const chords = part.progression.join(", ");
-  const header = [...Array.from(new TextEncoder().encode("MThd")), 0, 0, 0, 6, 0, 1, 0, 5, 0, 96];
-  const bytes = new Uint8Array([
-    ...header,
-    ...midiTrack(part.idea.riff, `${style} · riff · ${chords}`, part.idea.tempo, part.idea.meterMap),
-    ...midiTrack(part.idea.harmony, `${style} · chords · ${chords}`, part.idea.tempo, part.idea.meterMap),
-    ...midiTrack(part.idea.chordRhythm, `${style} · chord rhythm · ${chords}`, part.idea.tempo, part.idea.meterMap),
-    ...midiTrack(part.idea.bass ?? [], `${style} · bass · ${chords}`, part.idea.tempo, part.idea.meterMap),
-    ...midiTrack(part.idea.drums ?? [], `${style} · drums · ${chords}`, part.idea.tempo, part.idea.meterMap, 10),
-  ]);
+  const bytes = createMidiBytes(part.idea, style, part.progression.join(", "));
   const url = URL.createObjectURL(new Blob([bytes], { type: "audio/midi" })); const link = document.createElement("a");
   link.href = url; link.download = `${style.replaceAll(" ", "-").toLowerCase()}-${part.progression.join("-").replaceAll("/", "-")}.mid`; link.click(); URL.revokeObjectURL(url);
 }
@@ -290,7 +260,7 @@ export default function RiffizerClient() {
   }
 
   function playEvent(engine: SampleAuditionEngine, tone: GuitarSampleTone, event: PerformanceEvent, startTime: number, secondsPerBeat: number, strum = 0, level = .2) {
-    event.notes.forEach((note, index) => engine.playPitched(tone, note.midi, startTime + index * strum, Math.max(.01, event.duration * secondsPerBeat - index * strum), event.velocity, level));
+    event.notes.forEach((note, index) => engine.playPitched(tone, note.midi, startTime + index * strum, Math.max(.01, event.duration * secondsPerBeat - index * strum), event.velocity, level, event.notes.length === 1 ? event.expression : undefined, secondsPerBeat));
   }
 
   function playBassEvent(engine: SampleAuditionEngine, event: PerformanceEvent, startTime: number, secondsPerBeat: number) {
@@ -404,7 +374,7 @@ export default function RiffizerClient() {
         <div className="field-stack profile-field">
           <div className="field-label"><label htmlFor="artist">Style profile</label><button className="profile-info-button" onClick={() => setProfileInfoOpen((open) => !open)} aria-expanded={profileInfoOpen} aria-controls="profile-info">About profile</button></div>
           <select id="artist" value={artist} onChange={(event) => setArtist(event.target.value as Artist)}>{artists.map((name) => <option key={name} value={name}>{profileStyles[name].label}</option>)}</select>
-          {profileInfoOpen && <div className="profile-description" id="profile-info"><strong>{profileStyles[artist].label}</strong><p>{profileStyles[artist].description}</p></div>}
+          {profileInfoOpen && <div className="profile-description" id="profile-info"><strong>{profileStyles[artist].label}</strong><p>{profileStyles[artist].description}</p><p>{artistBehaviors[artist].summary}</p></div>}
         </div>
         <div className="control-pair">
           <div className="field-stack"><label htmlFor="section">Song part</label><select id="section" value={section} onChange={(event) => setSection(event.target.value as SectionType)}>{sectionTypes.map((type) => <option key={type}>{type}</option>)}</select></div>
@@ -445,6 +415,8 @@ function IdeaCard({ part, isPlaying, isLoading, auditionError, active, activeTim
     if (pluginHost) emitJuceEvent("riffizerDragSettings", { part, style: profileStyles[part.artist].label, ...exportOptions, settings: { harmonyEnabled, chordRhythmEnabled, riffEnabled, bassEnabled, drumsEnabled, fretboardTrack } });
   }, [pluginHost, part, exportOptions, harmonyEnabled, chordRhythmEnabled, riffEnabled, bassEnabled, drumsEnabled, fretboardTrack]);
   const events = fretboardEvents(part, fretboardTrack);
+  const expressionCounts = new Map<string, number>();
+  part.idea.riff.forEach((event) => { if (event.expression) { const label = expressionLabel(event.expression); expressionCounts.set(label, (expressionCounts.get(label) ?? 0) + 1); } });
   const modeLabel = fretboardTrack === "chordRhythm" ? "Chord rhythm" : fretboardTrack === "bass" ? "Bass" : "Riff";
   const meterLabel = Array.from(new Set(part.idea.meterMap.meters.map((meter) => meter.label))).join(" / ");
   const liveIndex = isPlaying && activeTime !== null ? events.findIndex((event) => activeTime >= event.time - 0.001 && activeTime < event.time + event.duration - 0.001) : -1;
@@ -470,7 +442,8 @@ function IdeaCard({ part, isPlaying, isLoading, auditionError, active, activeTim
     </div>
       <div className="track-view-row"><label className="track-view-selector"><span>Fretboard track</span><select value={fretboardTrack} onChange={(event) => onFretboardTrackChange(event.target.value as FretboardTrack)} aria-label="Choose the track shown on the fretboard"><option value="riff">Riff / melody</option><option value="chordRhythm">Chord rhythm</option><option value="bass">Bass line</option></select></label></div>
     <div className="riff-navigator" aria-label={`${modeLabel} note navigator`}><button className="fret-nav previous" onClick={() => onStep(-1)} aria-label={`Previous ${modeLabel.toLowerCase()} event`}>‹</button><div className="riff-fret-stage"><RiffTimeline events={events} activeBar={active} activeIndex={activeIndex} meterMap={part.idea.meterMap} /><Fretboard events={events} activeTime={activeTime} activeStep={activeStep} chordPreview={fretboardTrack === "chordRhythm" ? selectedChord?.event : undefined} isPlaying={isPlaying} label={modeLabel} instrument={fretboardTrack === "bass" ? "bass" : "guitar"} /></div><button className="fret-nav next" onClick={() => onStep(1)} aria-label={`Next ${modeLabel.toLowerCase()} event`}>›</button></div>
-    <details className="playback-help"><summary>Playback &amp; export</summary><p>{pluginHost ? "Play auditions all enabled tracks. Logic transport sends the selected guitar parts. Drag MIDI exports riff, harmony, chord rhythm, bass, and drums." : "Track switches control sample playback. MIDI exports all five tracks separately. Tap a chord to hear its voicing; use the arrows to step through the selected fretboard track."}</p></details>
+    {expressionCounts.size > 0 && <p className="idea-mode-note" aria-label="Guitar expression">{Array.from(expressionCounts, ([label, count]) => `${label} ×${count}`).join(" · ")}{fretboardTrack === "riff" && activeIndex !== null ? ` — ${expressionLabel(events[activeIndex]?.expression)}` : ""}</p>}
+    <details className="playback-help"><summary>Playback &amp; export</summary><p>{pluginHost ? "Play auditions all enabled tracks. Logic transport sends the selected guitar parts. Drag MIDI exports riff, harmony, chord rhythm, bass, and drums. Guitar gestures are heard in this preview; native Logic MIDI retains notes and velocities without pitch gestures." : "Track switches control sample playback. MIDI exports all five tracks on separate channels, with lead bends, slides, and vibrato. It requests a ±12-semitone pitch-bend range; set this manually if your instrument ignores the request. Legato and palm-mute markers describe the intended articulation; the receiving instrument controls their timbre. Tap a chord to hear its voicing; use the arrows to step through the selected fretboard track."}</p></details>
   </div></article>;
 }
 
