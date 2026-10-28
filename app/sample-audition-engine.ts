@@ -130,8 +130,8 @@ export class SampleAuditionEngine {
     if (!samples.length) return;
     const sample = nearestSample(samples, midi);
     const start = Math.max(this.context.currentTime + 0.004, time);
-    const length = Math.max(0.07, duration);
-    const release = Math.min(0.2, Math.max(0.04, length * 0.2));
+    const length = Math.max(0.01, duration);
+    const release = Math.min(0.09, length * 0.15);
     const source = this.context.createBufferSource();
     const envelope = this.context.createGain();
     source.buffer = sample.buffer;
@@ -139,7 +139,7 @@ export class SampleAuditionEngine {
     const peak = Math.max(0.012, Math.min(0.42, velocity * level));
     envelope.gain.setValueAtTime(0.0001, start);
     envelope.gain.linearRampToValueAtTime(peak, start + 0.006);
-    envelope.gain.setValueAtTime(peak * 0.72, Math.max(start + 0.012, start + length - release));
+    envelope.gain.linearRampToValueAtTime(peak * 0.72, Math.max(start + 0.006, start + length - release));
     envelope.gain.exponentialRampToValueAtTime(0.0001, start + length);
     source.connect(envelope).connect(this.output);
     source.onended = () => this.active.delete(source);

@@ -215,12 +215,13 @@ function choosePhrase(profile: Profile, role: PhraseRole, complexity: number, us
   const available = profile.phrases.filter((phrase) => phrase.min <= complexity);
   const compatible = available.filter((phrase) => !phraseMode(phrase) || phraseMode(phrase) === mode);
   const candidates = compatible.length ? compatible : available;
-  const freshCandidates = candidates.filter((phrase) => !used.has(phrase.id));
-  const pool = freshCandidates.length ? freshCandidates : candidates;
+  const pool = candidates;
   const rated = pool.map((phrase) => {
     const first: PlannedBar = { center, plan: phrase.chords[0], phraseId: phrase.id };
     const artistFit = phrase.roles.includes(role) ? 4 : 0.45;
-    const novelty = freshCandidates.length ? 1.2 : -1.4;
+    // Repetition is part of composition. A fitting hook should not be excluded
+    // just because it has already appeared in the section.
+    const novelty = used.has(phrase.id) ? (role === "hook" || role === "vamp" ? 1.5 : -.6) : .6;
     const tensionFit = role === "build" || role === "turnaround" ? phrase.tension * 0.45 : (5 - phrase.tension) * 0.12;
     return { phrase, score: artistFit + novelty + tensionFit + voiceLeadScore(last, first) + Math.random() * 1.2 };
   });
@@ -233,11 +234,11 @@ function choosePhrase(profile: Profile, role: PhraseRole, complexity: number, us
     threshold -= entry.score - lowestScore + 0.55;
     if (threshold <= 0) { chosen = entry.phrase; break; }
   }
+  const recalled = used.has(chosen.id);
   used.add(chosen.id);
-  if (freshCandidates.length) return chosen;
+  if (!recalled || role === "hook" || role === "vamp") return chosen;
 
-  // A long form can outgrow the profile's low-complexity vocabulary. Keep the
-  // function intact but alter one inner color so a phrase never returns verbatim.
+  // Develop a recalled answer without replacing its functional shape.
   const target = role === "turnaround" || role === "build" ? 2 : 1;
   const replacement = { ...chosen.chords[target] };
   if (replacement.suffix.includes("sus4")) replacement.suffix = replacement.suffix.replace("sus4", "sus2");
@@ -306,12 +307,12 @@ function applyCadence(bars: PlannedBar[], profile: Profile, section: SectionType
   }
 
   if (section === "Chorus" || section === "Outro") {
-    if (cadence === "iiV" && bars.length >= 3) { set(-3 + bars.length, 2, minor ? "m7b5" : "m9", "predominant"); set(-2 + bars.length, 7, complexity > 3 ? "13" : "7", "dominant"); set(-1 + bars.length, 0, tonic, "tonic"); }
+    if (cadence === "iiV") { if (bars.length >= 8) set(-3 + bars.length, 2, minor ? "m7b5" : "m9", "predominant"); set(-2 + bars.length, 7, minor ? (complexity > 2 ? "7b9" : "7") : complexity > 3 ? "13" : "7", "dominant"); set(-1 + bars.length, 0, tonic, "tonic"); }
     else if (cadence === "backdoor" && bars.length >= 2) { set(-2 + bars.length, 10, "13", "dominant"); set(-1 + bars.length, 0, tonic, "tonic"); }
-    else if (cadence === "neoclassical" && bars.length >= 3) { set(-3 + bars.length, 5, "m", "predominant"); set(-2 + bars.length, 7, "7b9", "dominant"); set(-1 + bars.length, 0, tonic, "tonic"); }
+    else if (cadence === "neoclassical") { if (bars.length >= 8) set(-3 + bars.length, 5, "m", "predominant"); set(-2 + bars.length, 7, complexity > 2 ? "7b9" : "7", "dominant"); set(-1 + bars.length, 0, tonic, "tonic"); }
     else if (cadence === "plagal" && bars.length >= 2) { set(-2 + bars.length, minor ? 5 : 5, minor ? "m7" : "maj7", "predominant"); set(-1 + bars.length, 0, tonic, "tonic"); }
     else if (cadence === "modal" && bars.length >= 2) { set(-2 + bars.length, minor ? 10 : 10, minor ? "maj" : "add9", "color"); set(-1 + bars.length, 0, tonic, "tonic"); }
-    else { set(-2 + bars.length, 7, "sus4", "dominant"); set(-1 + bars.length, 0, tonic, "tonic"); }
+    else { set(-2 + bars.length, 7, cadence === "rock" ? "7" : "sus4", "dominant"); set(-1 + bars.length, 0, tonic, "tonic"); }
     return;
   }
 
@@ -338,7 +339,8 @@ export function scoreProgressionCandidate(artist: Artist, section: SectionType, 
   const uniqueChords = new Set(generation.progression).size;
   const uniqueRoots = new Set(parsed.map((chord) => chord.root)).size;
   const pedalFriendly = artist === "Waxamilion" || artist === "Owane" || artist === "Yngwie Malmsteen";
-  score += uniqueChords * (pedalFriendly ? .9 : 2.1) + uniqueRoots * (pedalFriendly ? .6 : 1.2);
+  // Extra unique chords are not inherently better than a recognizable return.
+  score += Math.min(4, uniqueChords) * (pedalFriendly ? .9 : 2.1) + Math.min(4, uniqueRoots) * (pedalFriendly ? .6 : 1.2);
 
   parsed.forEach((chord, index) => {
     if (!index) return;
@@ -378,11 +380,24 @@ export function scoreProgressionCandidate(artist: Artist, section: SectionType, 
     if (index > 0 && generation.localCenters[index] === generation.localCenters[index - 1]) {
       const prior = parsed[index - 1];
       const priorOffset = mod(prior.root - (generation.localCenters[index - 1] ?? generation.center));
-      const transition = vocabulary.some((phrase) => phrase.chords.some((plan, i) => i > 0 && plan.offset === offset && phrase.chords[i - 1].offset === priorOffset));
+      const transition = vocabulary.some((phrase) => phrase.chords.some((plan, i) => i > 0 && plan.offset === offset && plan.suffix === chord.suffix && phrase.chords[i - 1].offset === priorOffset && phrase.chords[i - 1].suffix === prior.suffix));
       if (transition) fit += .75;
     }
   });
   score += fit / Math.max(1, parsed.length) * 8;
+  // Favor whole gestures from the selected grammar over a bag of individually
+  // plausible chords, without requiring copied songs or a fixed progression.
+  let gestures = 0;
+  for (let index = 0; index < parsed.length - 2; index += 1) {
+    const center = generation.localCenters[index] ?? generation.center;
+    if (generation.localCenters.slice(index, index + 3).some((value) => value !== center)) continue;
+    const match = vocabulary.some((phrase) => phrase.chords.some((_, start) => start <= phrase.chords.length - 3 && parsed.slice(index, index + 3).every((chord, step) => {
+      const plan = phrase.chords[start + step];
+      return mod(chord.root - center) === plan.offset && chord.suffix === plan.suffix;
+    })));
+    if (match) gestures += 1;
+  }
+  score += gestures / Math.max(1, parsed.length - 2) * 7;
   return score;
 }
 

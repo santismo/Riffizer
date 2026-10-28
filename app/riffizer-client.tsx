@@ -116,7 +116,7 @@ export default function RiffizerClient() {
   const [bars, setBars] = useState(4);
   const [complexity, setComplexity] = useState(3);
   const [rhythmComplexity, setRhythmComplexity] = useState(2);
-  const [modulation, setModulation] = useState(30);
+  const [modulation, setModulation] = useState(0);
   const [parts, setParts] = useState<Part[]>([]);
   const [draft, setDraft] = useState<Part | null>(null);
   const [playingKey, setPlayingKey] = useState<string | null>(null);
@@ -290,11 +290,11 @@ export default function RiffizerClient() {
   }
 
   function playEvent(engine: SampleAuditionEngine, tone: GuitarSampleTone, event: PerformanceEvent, startTime: number, secondsPerBeat: number, strum = 0, level = .2) {
-    event.notes.forEach((note, index) => engine.playPitched(tone, note.midi, startTime + index * strum, Math.max(.1, event.duration * secondsPerBeat * .9), event.velocity, level));
+    event.notes.forEach((note, index) => engine.playPitched(tone, note.midi, startTime + index * strum, Math.max(.01, event.duration * secondsPerBeat - index * strum), event.velocity, level));
   }
 
   function playBassEvent(engine: SampleAuditionEngine, event: PerformanceEvent, startTime: number, secondsPerBeat: number) {
-    event.notes.forEach((note) => engine.playPitched("bass", note.midi, startTime, Math.max(.12, event.duration * secondsPerBeat * .94), event.velocity, .27));
+    event.notes.forEach((note) => engine.playPitched("bass", note.midi, startTime, Math.max(.01, event.duration * secondsPerBeat), event.velocity, .27));
   }
 
   function playDrumEvent(engine: SampleAuditionEngine, event: PerformanceEvent, startTime: number) {
