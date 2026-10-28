@@ -86,6 +86,26 @@ mobile. **About profile** explains the selected style; **Playback & export**
 contains usage details. The standalone website still exports five-track MIDI,
 and the Logic plug-in retains its channel and track export options.
 
+### Sustained phrasing and coordinated changes
+
+All pitched lanes now follow the same harmonic timeline, including early, late,
+and split changes. Harmony rings until the next change; chord rhythm and bass
+use whichever chord is actually sounding. Held lead notes favor structural chord
+tones and common tones across changes, and release before incompatible harmony.
+Chromatic bass pickups are brief and resolve to the next root within half a beat.
+
+Each profile reserves a different amount of space for an answer or arrival:
+lyrical profiles have broad sustained notes, fusion profiles connect short runs,
+and pedal/rock profiles retain their clipped attacks between held endings.
+Playback respects the generated durations without an extra gate, and MIDI uses
+those same durations. Chord voicings favor nearby voices between changes.
+
+The progression scorer rewards complete profile gestures and allows returning
+hooks. Four-bar cadences preserve the opening half of the profile's progression
+instead of replacing three bars with a generic turnaround. New sessions start
+with internal modulation at 0%; the full modulation control remains available.
+These are compositional rules and tuning choices, not measured artist models.
+
 ## Validation
 
 `npm run test:engine` checks chord spellings in every key, all ten profiles across

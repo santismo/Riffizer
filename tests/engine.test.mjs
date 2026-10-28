@@ -82,7 +82,7 @@ test("regenerate changes only the riff and preserves saved accompaniment, tempo,
     assert.notDeepEqual(updated.riff, source.riff);
     verify(updated, `regenerated ${artist}`);
     const restored = completePerformanceIdea(artist, "Verse", h.progression, 4, 4, updated);
-    assert.deepEqual(restored.riff, updated.riff);
+    assert.deepEqual(restored, updated);
   }
 }));
 
@@ -120,4 +120,57 @@ test("extended chord voicings preserve their distinguishing guide tones", () => 
       for (const guide of guides) assert.ok(pcs.includes(guide), `${artist} ${chord} compact=${compact}: ${pcs}`);
     }
   }
+});
+
+function activeHarmony(idea, time) {
+  return idea.harmony.findLast((event) => event.time <= time + 1e-6);
+}
+
+test("all pitched lanes share early, late, split, and mixed-meter chord changes", () => seeded(8401, () => {
+  const chart = ["Cmaj7", "Dbmaj7", "Dm9", "G7"];
+  for (const artist of artists) for (const rhythm of [0, 2, 3, 4, 5]) {
+    const idea = createPerformanceIdea(artist, "Verse", chart, [0, 0, 0, 0], "major", 5, rhythm);
+    const context = `${artist}/${rhythm}`;
+    assert.deepEqual(idea.harmony.map((e) => e.chord), chart, `no backwards re-attacks: ${context}`);
+    idea.harmony.forEach((event, index) => {
+      assert.ok(event.time + event.duration <= (idea.harmony[index + 1]?.time ?? idea.meterMap.totalBeats), context);
+    });
+    for (const lane of [idea.chordRhythm, idea.bass]) for (const event of lane) {
+      const active = activeHarmony(idea, event.time);
+      assert.equal(event.chord, active.chord, `lane disagreement: ${context}`);
+      if (event.duration > .3) assert.ok(event.notes.every((note) => tones(active.chord).includes(pc(note.midi))), `held bass tension: ${context}`);
+    }
+    for (const lane of [idea.riff, idea.chordRhythm, idea.bass]) for (const event of lane) {
+      if (event.duration >= .65) assert.ok(event.notes.every((note) => tones(activeHarmony(idea, event.time).chord).includes(pc(note.midi))), `long non-chord tone: ${context}`);
+      for (const change of idea.harmony.filter((h) => h.time > event.time + 1e-6 && h.time < event.time + event.duration - 1e-6)) {
+        assert.ok(event.notes.every((note) => tones(change.chord).includes(pc(note.midi))), `held across incompatible change: ${context}`);
+      }
+    }
+  }
+}));
+
+test("each profile reserves held arrivals while keeping contrasting short gestures", () => seeded(291, () => {
+  for (const artist of artists) for (const rhythm of [0, 4, 5]) {
+    const idea = createPerformanceIdea(artist, "Solo", ["Cmaj7", "Am7", "Fmaj7", "G7"], [0, 0, 0, 0], "major", 4, rhythm);
+    const last = idea.riff.at(-1);
+    const beats = idea.meterMap.meters.at(-1).beatsPerBar;
+    assert.ok(last.duration >= .9 * beats / 4, `missing held arrival: ${artist}/${rhythm}`);
+    assert.ok(idea.riff.some((e) => e.duration < .5), `lost short gestures: ${artist}/${rhythm}`);
+    const clipped = { ...idea, riff: idea.riff.map((e) => ({ ...e, duration: Math.min(.18, e.duration) })) };
+    assert.ok(scorePhraseIntelligence(artist, "Solo", idea) > scorePhraseIntelligence(artist, "Solo", clipped), `scorer favors clipped phrasing: ${artist}`);
+  }
+}));
+
+test("the scorer hears a chord change underneath a held note", () => seeded(31, () => {
+  const idea = createPerformanceIdea("Nick Johnston", "Verse", ["Cmaj", "Dbmaj", "Dm", "G7"], [0, 0, 0, 0], "major", 3, 0);
+  const phrase = { time: 3, duration: 2, notes: [{ midi: 64, string: 0, fret: 0 }], velocity: .8 };
+  const unsafe = { ...idea, riff: [phrase] };
+  const released = { ...unsafe, riff: [{ ...phrase, duration: .98 }] };
+  assert.ok(scorePhraseIntelligence("Nick Johnston", "Verse", released) > scorePhraseIntelligence("Nick Johnston", "Verse", unsafe));
+}));
+
+test("harmonic grammar rewards coherent gestures over reordered chord vocabulary", () => {
+  const generation = { center: 0, mode: "major", useFlats: false, endingPc: 7, localCenters: [0, 0, 0, 0], progression: ["Cmaj7", "Am7", "Dm7", "G7"] };
+  const scrambled = { ...generation, progression: ["Dm7", "Am7", "Cmaj7", "G7"] };
+  assert.ok(scoreProgressionCandidate("Matteo Mancuso", "Verse", generation) > scoreProgressionCandidate("Matteo Mancuso", "Verse", scrambled));
 });
