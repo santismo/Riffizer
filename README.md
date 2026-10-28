@@ -66,9 +66,18 @@ Candidate scoring measures harmonic fit, phrase recall, density, space, dynamics
 and playability. Per-note bonuses are normalized, and texture limits are measured
 per bar, so length or sheer note count does not dominate the choice.
 
-These are hand-authored interpretations, not trained artist replicas. Instrument
-samples and MIDI note lengths/velocities approximate articulation; the engine does
-not synthesize authentic finger attack, bends, slides, or vibrato.
+Each profile now also shapes harmonic pacing, tension arcs, accent positions,
+register, motif-return intervals, answer transformations, and preferred landing
+tones. Expressive single-note gestures include target bends, same-string slides,
+softened legato, muted attacks, and delayed vibrato. They follow the realized
+fingering and harmonic targets instead of being scattered randomly over a phrase.
+**About profile** explains these decisions; generated ideas show their articulation
+summary.
+
+These are hand-authored interpretations, not trained artist replicas. Sample
+playback approximates these gestures through pitch envelopes, attack shaping,
+and filtering. Reference links, interpretation limits, and technical details are
+in [the profile design notes](docs/profile-design.md).
 
 Design references include Matteo Mancuso's own descriptions of
 [arpeggios, legato, and melodic storytelling](https://www.guitarworld.com/features/matteo-mancuso-talks-tone-technique-and-guthrie-govan)
@@ -84,7 +93,12 @@ A restrained dark workspace groups composition settings, chord audition, playbac
 tracks, tempo, and fretboard navigation. All capabilities remain accessible on
 mobile. **About profile** explains the selected style; **Playback & export**
 contains usage details. The standalone website still exports five-track MIDI,
-and the Logic plug-in retains its channel and track export options.
+with independent lead/accompaniment channels and lead pitch gestures. It requests
+a ±12-semitone bend range; instruments that ignore RPN messages need that range
+set manually. Legato/mute markers convey intent, with timbre determined by the
+receiving instrument. The Logic plug-in retains its existing native note/velocity
+transport and drag export options; its shared WebView preview supports expression
+when rebuilt.
 
 ### Sustained phrasing and coordinated changes
 
@@ -111,7 +125,9 @@ These are compositional rules and tuning choices, not measured artist models.
 `npm run test:engine` checks chord spellings in every key, all ten profiles across
 4/8/12-bar forms, simple/complex and mixed-meter settings, playable fingerings,
 phrase landings, non-overlapping lead notes, riff-only regeneration, legacy
-completion, scoring regressions, and distinct Silk Current behavior. `npm test`
+completion, scoring regressions, distinct Silk Current behavior, profile
+register/pacing differences, guitar gesture constraints, MIDI pitch isolation/reset ordering, and sample scheduling through a
+silent mock. `npm test`
 also runs the hosted build and rendered-page test. `npm run build:pages` verifies
 the static mirror output.
 
