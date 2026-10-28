@@ -24,6 +24,8 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
+      - run: npm run test:engine
+      - run: npx tsc --noEmit
       - id: pages
         uses: actions/configure-pages@v5
       - name: Build static Riffizer

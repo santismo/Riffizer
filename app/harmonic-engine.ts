@@ -1,4 +1,6 @@
-export const artists = ["Nick Johnston", "Moray Pringle", "Owane", "Waxamilion", "CHON", "Marco Sfogli", "Guthrie Govan", "Greg Howe", "Yngwie Malmsteen"] as const;
+import { chordTonesForQuality } from "./chord-tones";
+
+export const artists = ["Nick Johnston", "Moray Pringle", "Owane", "Waxamilion", "CHON", "Marco Sfogli", "Guthrie Govan", "Greg Howe", "Yngwie Malmsteen", "Matteo Mancuso"] as const;
 export type Artist = (typeof artists)[number];
 export type SectionType = "Intro" | "Verse" | "Pre-chorus" | "Chorus" | "Bridge" | "Solo" | "Outro";
 export type Mode = "major" | "minor";
@@ -117,6 +119,17 @@ const engines: Record<Artist, Profile> = {
       p("compact-release", 4, ["release", "hook"], 3, [c(5, "maj9", "predominant"), c(4, "7alt", "passing"), c(9, "m9", "predominant"), c(0, "maj7", "tonic")]),
     ],
   },
+  "Matteo Mancuso": {
+    color: "#78dac1", note: "fluid fingerstyle fusion · extended arpeggios · melodic answers", modes: ["major", "minor", "major"], shifts: [5, 7, 2, -2, 3], pivots: ["commonTone", "dominant", "backcycle"], cadences: ["iiV", "backdoor", "modal"], majorTonic: ["maj7", "6/9", "maj9"], minorTonic: ["m7", "m9", "m6"],
+    phrases: [
+      p("singing-fusion", 1, ["opening", "hook"], 1, [c(0, "maj7", "tonic"), c(9, "m7", "tonic"), c(2, "m7", "predominant"), c(7, "7", "dominant")]),
+      p("minor-dialogue", 1, ["answer", "vamp"], 2, [c(0, "m7", "tonic"), c(5, "m7", "predominant"), c(10, "7", "dominant"), c(3, "maj7", "color")]),
+      p("upper-color", 2, ["lift", "release"], 2, [c(0, "maj9", "tonic"), c(4, "m7", "color"), c(9, "m9", "tonic"), c(5, "maj7", "predominant")]),
+      p("flowing-turn", 3, ["turnaround", "answer"], 3, [c(2, "m9", "predominant"), c(7, "13", "dominant"), c(0, "6/9", "tonic"), c(9, "7", "passing")]),
+      p("minor-extension", 3, ["contrast", "build"], 3, [c(0, "m9", "tonic"), c(5, "13", "color"), c(2, "m7b5", "predominant"), c(7, "7b9", "dominant")]),
+      p("chromatic-release", 4, ["turnaround", "release"], 4, [c(5, "m9", "predominant"), c(10, "13", "dominant"), c(0, "maj9", "tonic"), c(0, "6/9", "tonic")]),
+    ],
+  },
   "Yngwie Malmsteen": {
     color: "#ffde63", note: "harmonic-minor drama · pedal/sequence · emphatic V→i", modes: ["minor", "minor", "minor", "major"], shifts: [3, 5, 7, -3, 9], pivots: ["diminished", "dominant", "direct"], cadences: ["neoclassical"], majorTonic: ["maj", "add9"], minorTonic: ["m", "m", "m(add9)"],
     phrases: [
@@ -153,15 +166,7 @@ const sectionArcs: Record<SectionType, PhraseRole[]> = {
   "Outro": ["release", "hook", "release", "release"],
 };
 
-function chordTones(root: number, suffix: string) {
-  if (suffix.includes("dim")) return [0, 3, 6, 9].map((interval) => mod(root + interval));
-  if (suffix.includes("m7b5")) return [0, 3, 6, 10].map((interval) => mod(root + interval));
-  if (suffix.includes("sus")) return [0, 5, 7].map((interval) => mod(root + interval));
-  if (suffix.includes("m") && !suffix.includes("maj")) return [0, 3, 7, ...(suffix.includes("7") || suffix.includes("9") || suffix.includes("11") ? [10] : [])].map((interval) => mod(root + interval));
-  if (suffix.includes("7") && !suffix.includes("maj")) return [0, 4, 7, 10].map((interval) => mod(root + interval));
-  if (suffix.includes("maj7")) return [0, 4, 7, 11].map((interval) => mod(root + interval));
-  return [0, 4, 7].map((interval) => mod(root + interval));
-}
+const chordTones = chordTonesForQuality;
 
 function voiceLeadScore(previous: PlannedBar | undefined, next: PlannedBar) {
   if (!previous) return 0.7;
@@ -200,8 +205,16 @@ function chooseContext(previous: HarmonicState | undefined, profile: Profile) {
   return { center, mode, useFlats: [1, 3, 5, 6, 8, 10].includes(center) ? Math.random() > 0.38 : Math.random() > 0.78 };
 }
 
-function choosePhrase(profile: Profile, role: PhraseRole, complexity: number, used: Set<string>, last: PlannedBar | undefined, center: number) {
-  const candidates = profile.phrases.filter((phrase) => phrase.min <= complexity);
+function phraseMode(phrase: Phrase): Mode | undefined {
+  const tonic = phrase.chords.find((chord) => chord.offset === 0 && !chord.suffix.includes("sus"));
+  if (!tonic) return undefined;
+  return /^m(?!aj)/.test(tonic.suffix) ? "minor" : "major";
+}
+
+function choosePhrase(profile: Profile, role: PhraseRole, complexity: number, used: Set<string>, last: PlannedBar | undefined, center: number, mode: Mode) {
+  const available = profile.phrases.filter((phrase) => phrase.min <= complexity);
+  const compatible = available.filter((phrase) => !phraseMode(phrase) || phraseMode(phrase) === mode);
+  const candidates = compatible.length ? compatible : available;
   const freshCandidates = candidates.filter((phrase) => !used.has(phrase.id));
   const pool = freshCandidates.length ? freshCandidates : candidates;
   const rated = pool.map((phrase) => {
@@ -325,7 +338,7 @@ export function scoreProgressionCandidate(artist: Artist, section: SectionType, 
   const uniqueChords = new Set(generation.progression).size;
   const uniqueRoots = new Set(parsed.map((chord) => chord.root)).size;
   const pedalFriendly = artist === "Waxamilion" || artist === "Owane" || artist === "Yngwie Malmsteen";
-  score += uniqueChords * 2.1 + uniqueRoots * 1.2;
+  score += uniqueChords * (pedalFriendly ? .9 : 2.1) + uniqueRoots * (pedalFriendly ? .6 : 1.2);
 
   parsed.forEach((chord, index) => {
     if (!index) return;
@@ -333,12 +346,12 @@ export function scoreProgressionCandidate(artist: Artist, section: SectionType, 
     const shared = chordTones(prior.root, prior.suffix).filter((tone) => chordTones(chord.root, chord.suffix).includes(tone)).length;
     const rootMotion = distance(prior.root, chord.root);
     score += shared * 1.15 + (rootMotion <= 2 ? 1.2 : rootMotion <= 5 ? 0.55 : -0.25);
-    if (prior.root === chord.root && prior.suffix === chord.suffix) score -= 8;
+    if (prior.root === chord.root && prior.suffix === chord.suffix) score -= pedalFriendly ? 1.5 : 6;
     else if (prior.root === chord.root && !pedalFriendly) score -= 1.3;
   });
 
   const centerChanges = generation.localCenters.filter((center, index) => index > 0 && center !== generation.localCenters[index - 1]).length;
-  if (centerChanges) score += centerChanges * 2.4;
+  // Modulation is controlled by the slider; do not automatically reward more changes.
   if (centerChanges > 2) score -= (centerChanges - 2) * 3;
 
   const first = parsed[0]; const last = parsed[parsed.length - 1];
@@ -350,17 +363,34 @@ export function scoreProgressionCandidate(artist: Artist, section: SectionType, 
   }
 
   const finalCenter = generation.localCenters.at(-1) ?? generation.center;
-  const finalDistance = distance(last.root, finalCenter);
+  const finalDistance = mod(last.root - finalCenter);
   if (section === "Pre-chorus") score += finalDistance === 5 ? 4.5 : finalDistance === 7 ? 3.8 : 0;
   else if (section === "Chorus" || section === "Outro") score += finalDistance === 0 ? 5.8 : finalDistance <= 2 ? 1.2 : -1.3;
   else score += finalDistance === 0 ? 2.6 : finalDistance === 7 ? 1.3 : 0;
   if (section === "Solo" || section === "Bridge") score += uniqueRoots >= 3 ? 2.1 : 0;
+  // Rank against this artist's harmonic vocabulary, not just generic smoothness.
+  const vocabulary = engines[artist].phrases;
+  let fit = 0;
+  parsed.forEach((chord, index) => {
+    const offset = mod(chord.root - (generation.localCenters[index] ?? generation.center));
+    const matches = vocabulary.some((phrase) => phrase.chords.some((plan) => plan.offset === offset && plan.suffix === chord.suffix));
+    if (matches) fit += 1;
+    if (index > 0 && generation.localCenters[index] === generation.localCenters[index - 1]) {
+      const prior = parsed[index - 1];
+      const priorOffset = mod(prior.root - (generation.localCenters[index - 1] ?? generation.center));
+      const transition = vocabulary.some((phrase) => phrase.chords.some((plan, i) => i > 0 && plan.offset === offset && phrase.chords[i - 1].offset === priorOffset));
+      if (transition) fit += .75;
+    }
+  });
+  score += fit / Math.max(1, parsed.length) * 8;
   return score;
 }
 
 export function createProgression(artist: Artist, bars: number, section: SectionType, complexity: number, modulation: number, previous?: HarmonicState): HarmonicGeneration {
   const profile = engines[artist];
-  const { center, mode, useFlats } = chooseContext(previous, profile);
+  const context = chooseContext(previous, profile);
+  const { center, useFlats } = context;
+  let mode = context.mode;
   const used = new Set<string>();
   const blocks: PlannedBar[][] = [];
   const localCenter = center;
@@ -369,7 +399,8 @@ export function createProgression(artist: Artist, bars: number, section: Section
   for (let block = 0; block < Math.ceil(bars / 4); block += 1) {
     const arc = sectionArcs[section];
     const role = arc[Math.min(block, arc.length - 1)];
-    const phrase = choosePhrase(profile, role, complexity, used, last, localCenter);
+    const phrase = choosePhrase(profile, role, complexity, used, last, localCenter, mode);
+    if (block === 0) mode = phraseMode(phrase) ?? mode;
     const phraseBars = phrase.chords.map((plan) => ({ center: localCenter, plan, phraseId: phrase.id }));
     blocks.push(phraseBars);
     last = phraseBars[phraseBars.length - 1];

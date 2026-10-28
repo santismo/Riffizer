@@ -1,3 +1,5 @@
+import { phrasingProfiles, type RhythmCell } from "./phrasing-profiles";
+import { chordTonesForQuality } from "./chord-tones";
 import { pitchClasses, type Artist, type Mode, type SectionType } from "./harmonic-engine";
 
 export type FretNote = { midi: number; string: number; fret: number };
@@ -22,7 +24,6 @@ export type PerformanceIdea = {
 };
 
 type RiffKind = "melodic" | "rock" | "interlock" | "pedal" | "fusion" | "sequence" | "angular";
-type RhythmCell = { id: string; times: number[]; durations: number[]; accents: number[]; cadence?: boolean };
 type HarmonicPhrasing = "downbeat" | "late" | "anticipate" | "split";
 type TexturePolicy = { minSingles: number; maxDyads: number; maxTriads: number; triadOnAccentOnly?: boolean };
 type PlayingComfort = {
@@ -33,10 +34,10 @@ type PlayingComfort = {
   preferredMaxFret: number;
   pedalFriendly?: boolean;
 };
-type PerformanceProfile = { riff: RiffKind; riffLabel: string; tempo: number; position: number; steps: number[]; meters: TimeSignature[]; chordFeel: HarmonicPhrasing; gripReach: number; texture: TexturePolicy; comfort: PlayingComfort };
+type PerformanceProfile = { riff: RiffKind; riffLabel: string; tempo: number; position: number; meters: TimeSignature[]; chordFeel: HarmonicPhrasing; gripReach: number; texture: TexturePolicy; comfort: PlayingComfort };
 type PhraseMotion = "statement" | "answer" | "development" | "arrival";
-type ArtistMotif = { contour: number[]; accentTones: number[]; pickup: number; pedalEvery?: number; meterWeights: Record<string, number> };
-type RiffBarPlan = RhythmCell & { variation: number; phraseMotion: PhraseMotion };
+type ArtistMotif = { accentTones: number[]; pickup: number; pedalEvery?: number; meterWeights: Record<string, number> };
+type RiffBarPlan = RhythmCell & { variation: number; phraseMotion: PhraseMotion; contour: number[] };
 type ChordRhythmCell = { id: string; hits: number[]; lengths: number[]; accents: number[]; finalHold?: boolean };
 type RiffCursor = { midi: number; gripCenter?: number; anchor?: FretNote; handPosition: number };
 type GripContext = { anchor: FretNote; handPosition: number; previousCenter?: number; previousAnchor?: FretNote; allowOpenPedal: boolean; maxSpan: number; maxShift: number; maxStringTravel: number };
@@ -58,30 +59,32 @@ const nineEight: TimeSignature = { label: "9/8", beatsPerBar: 4.5 };
 const sixEight: TimeSignature = { label: "6/8", beatsPerBar: 3 };
 
 const performanceProfiles: Record<Artist, PerformanceProfile> = {
-  "Nick Johnston": { riff: "melodic", riffLabel: "melodic color motif", tempo: 102, position: 4, steps: [2, 3, -1, 2, -2], meters: [fourFour, sixEight], chordFeel: "anticipate", gripReach: 4, texture: { minSingles: 3, maxDyads: 1, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 7, preferredMinFret: 2, preferredMaxFret: 10 } },
-  "Moray Pringle": { riff: "rock", riffLabel: "wide rock-fusion riff", tempo: 118, position: 5, steps: [2, -2, 3, 2, -1], meters: [fourFour, fiveFour, sevenEight], chordFeel: "late", gripReach: 4, texture: { minSingles: 2, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 5, maxStringTravel: 2, lineLeap: 9, preferredMinFret: 2, preferredMaxFret: 10, pedalFriendly: true } },
-  Owane: { riff: "angular", riffLabel: "bright angular interlock", tempo: 126, position: 7, steps: [2, 2, -1, 3, -2], meters: [fourFour, sevenEight, fiveFour, nineEight], chordFeel: "anticipate", gripReach: 5, texture: { minSingles: 3, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 8, preferredMinFret: 3, preferredMaxFret: 11 } },
-  Waxamilion: { riff: "pedal", riffLabel: "pedal-axis fragment", tempo: 108, position: 6, steps: [3, -1, 2, -3, 2], meters: [fourFour, fiveFour, sevenEight], chordFeel: "late", gripReach: 4, texture: { minSingles: 2, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 8, preferredMinFret: 1, preferredMaxFret: 10, pedalFriendly: true } },
-  CHON: { riff: "interlock", riffLabel: "interlocking bright riff", tempo: 132, position: 5, steps: [2, 2, -2, 3, -1], meters: [fourFour, sevenEight, fiveFour, nineEight], chordFeel: "split", gripReach: 5, texture: { minSingles: 3, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 8, preferredMinFret: 2, preferredMaxFret: 11 } },
-  "Marco Sfogli": { riff: "melodic", riffLabel: "anthemic melodic riff", tempo: 112, position: 4, steps: [2, 2, -1, 3, -2], meters: [fourFour, sixEight], chordFeel: "downbeat", gripReach: 4, texture: { minSingles: 3, maxDyads: 1, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 8, preferredMinFret: 2, preferredMaxFret: 10 } },
-  "Guthrie Govan": { riff: "fusion", riffLabel: "groove-aware fusion riff", tempo: 116, position: 7, steps: [2, -1, 3, -2, 2], meters: [fourFour, sixEight, sevenEight], chordFeel: "late", gripReach: 4, texture: { minSingles: 3, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 9, preferredMinFret: 3, preferredMaxFret: 11 } },
-  "Greg Howe": { riff: "fusion", riffLabel: "punchy linear fusion riff", tempo: 122, position: 6, steps: [2, 2, -1, -2, 3], meters: [fourFour, sevenEight, fiveFour], chordFeel: "anticipate", gripReach: 4, texture: { minSingles: 2, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 1, lineLeap: 8, preferredMinFret: 3, preferredMaxFret: 11 } },
-  "Yngwie Malmsteen": { riff: "sequence", riffLabel: "minor-key pedal sequence", tempo: 138, position: 4, steps: [2, 1, 2, -1, -2], meters: [fourFour, sixEight], chordFeel: "downbeat", gripReach: 5, texture: { minSingles: 4, maxDyads: 1, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 5, maxStringTravel: 1, lineLeap: 9, preferredMinFret: 1, preferredMaxFret: 11, pedalFriendly: true } },
+  "Nick Johnston": { riff: "melodic", riffLabel: "melodic color motif", tempo: 102, position: 4, meters: [fourFour, sixEight], chordFeel: "anticipate", gripReach: 4, texture: { minSingles: 3, maxDyads: 1, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 7, preferredMinFret: 2, preferredMaxFret: 10 } },
+  "Moray Pringle": { riff: "rock", riffLabel: "wide rock-fusion riff", tempo: 118, position: 5, meters: [fourFour, fiveFour, sevenEight], chordFeel: "late", gripReach: 4, texture: { minSingles: 2, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 5, maxStringTravel: 2, lineLeap: 9, preferredMinFret: 2, preferredMaxFret: 10, pedalFriendly: true } },
+  Owane: { riff: "angular", riffLabel: "bright angular interlock", tempo: 126, position: 7, meters: [fourFour, sevenEight, fiveFour, nineEight], chordFeel: "anticipate", gripReach: 5, texture: { minSingles: 3, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 8, preferredMinFret: 3, preferredMaxFret: 11 } },
+  Waxamilion: { riff: "pedal", riffLabel: "pedal-axis fragment", tempo: 108, position: 6, meters: [fourFour, fiveFour, sevenEight], chordFeel: "late", gripReach: 4, texture: { minSingles: 2, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 8, preferredMinFret: 1, preferredMaxFret: 10, pedalFriendly: true } },
+  CHON: { riff: "interlock", riffLabel: "interlocking bright riff", tempo: 132, position: 5, meters: [fourFour, sevenEight, fiveFour, nineEight], chordFeel: "split", gripReach: 5, texture: { minSingles: 3, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 8, preferredMinFret: 2, preferredMaxFret: 11 } },
+  "Marco Sfogli": { riff: "melodic", riffLabel: "anthemic melodic riff", tempo: 112, position: 4, meters: [fourFour, sixEight], chordFeel: "downbeat", gripReach: 4, texture: { minSingles: 3, maxDyads: 1, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 8, preferredMinFret: 2, preferredMaxFret: 10 } },
+  "Guthrie Govan": { riff: "fusion", riffLabel: "groove-aware fusion riff", tempo: 116, position: 7, meters: [fourFour, sixEight, sevenEight], chordFeel: "late", gripReach: 4, texture: { minSingles: 3, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 2, lineLeap: 9, preferredMinFret: 3, preferredMaxFret: 11 } },
+  "Greg Howe": { riff: "fusion", riffLabel: "punchy linear fusion riff", tempo: 122, position: 6, meters: [fourFour, sevenEight, fiveFour], chordFeel: "anticipate", gripReach: 4, texture: { minSingles: 2, maxDyads: 2, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 1, lineLeap: 8, preferredMinFret: 3, preferredMaxFret: 11 } },
+  "Matteo Mancuso": { riff: "fusion", riffLabel: "fluid fingerstyle fusion", tempo: 118, position: 6, meters: [fourFour, sixEight, sevenEight], chordFeel: "anticipate", gripReach: 4, texture: { minSingles: 5, maxDyads: 1, maxTriads: 0, triadOnAccentOnly: true }, comfort: { maxShift: 4, maxStringTravel: 3, lineLeap: 10, preferredMinFret: 2, preferredMaxFret: 11 } },
+  "Yngwie Malmsteen": { riff: "sequence", riffLabel: "minor-key pedal sequence", tempo: 138, position: 4, meters: [fourFour, sixEight], chordFeel: "downbeat", gripReach: 5, texture: { minSingles: 4, maxDyads: 1, maxTriads: 1, triadOnAccentOnly: true }, comfort: { maxShift: 5, maxStringTravel: 1, lineLeap: 9, preferredMinFret: 1, preferredMaxFret: 11, pedalFriendly: true } },
 };
 
 // These are original high-level playing tendencies, used as constraints rather
 // than copied phrases. They give each engine a distinct melodic trajectory,
 // harmonic landing preference, pickup behavior, and meter tolerance.
 const artistMotifs: Record<Artist, ArtistMotif> = {
-  "Nick Johnston": { contour: [2, 1, -2, 3, -1], accentTones: [3, 1, 0, 2], pickup: 0.16, meterWeights: { "4/4": 8, "6/8": 2 } },
-  "Moray Pringle": { contour: [0, -2, 3, -1, 2], accentTones: [0, 2, 1, 0], pickup: 0.1, pedalEvery: 4, meterWeights: { "4/4": 7, "5/4": 2, "7/8": 1 } },
-  Owane: { contour: [2, -1, 3, 1, -2, 2], accentTones: [3, 1, 2, 0], pickup: 0.24, meterWeights: { "4/4": 7, "7/8": 2, "5/4": 1, "9/8": 1 } },
-  Waxamilion: { contour: [0, 3, -2, 1, -3], accentTones: [0, 3, 0, 2], pickup: 0.2, pedalEvery: 3, meterWeights: { "4/4": 7, "5/4": 2, "7/8": 1 } },
-  CHON: { contour: [2, 2, -1, 3, -2, 1], accentTones: [3, 1, 2, 0], pickup: 0.25, meterWeights: { "4/4": 6, "7/8": 2, "5/4": 1, "9/8": 1 } },
-  "Marco Sfogli": { contour: [2, 1, -1, 3, -2], accentTones: [0, 2, 1, 0], pickup: 0.08, meterWeights: { "4/4": 8, "6/8": 2 } },
-  "Guthrie Govan": { contour: [1, -2, 3, -1, 2, -3], accentTones: [1, 3, 2, 0], pickup: 0.2, meterWeights: { "4/4": 7, "6/8": 2, "7/8": 1 } },
-  "Greg Howe": { contour: [2, -1, 2, 3, -2], accentTones: [0, 1, 3, 2], pickup: 0.22, meterWeights: { "4/4": 7, "7/8": 2, "5/4": 1 } },
-  "Yngwie Malmsteen": { contour: [1, 2, -1, 2, -2, -1], accentTones: [0, 2, 1, 0], pickup: 0.08, pedalEvery: 4, meterWeights: { "4/4": 8, "6/8": 2 } },
+  "Nick Johnston": { accentTones: [3, 1, 0, 2], pickup: 0.16, meterWeights: { "4/4": 8, "6/8": 2 } },
+  "Moray Pringle": { accentTones: [0, 2, 1, 0], pickup: 0.1, pedalEvery: 4, meterWeights: { "4/4": 7, "5/4": 2, "7/8": 1 } },
+  Owane: { accentTones: [3, 1, 2, 0], pickup: 0.24, meterWeights: { "4/4": 7, "7/8": 2, "5/4": 1, "9/8": 1 } },
+  Waxamilion: { accentTones: [0, 3, 0, 2], pickup: 0.2, pedalEvery: 3, meterWeights: { "4/4": 7, "5/4": 2, "7/8": 1 } },
+  CHON: { accentTones: [3, 1, 2, 0], pickup: 0.25, meterWeights: { "4/4": 6, "7/8": 2, "5/4": 1, "9/8": 1 } },
+  "Marco Sfogli": { accentTones: [0, 2, 1, 0], pickup: 0.08, meterWeights: { "4/4": 8, "6/8": 2 } },
+  "Guthrie Govan": { accentTones: [1, 3, 2, 0], pickup: 0.2, meterWeights: { "4/4": 7, "6/8": 2, "7/8": 1 } },
+  "Greg Howe": { accentTones: [0, 1, 3, 2], pickup: 0.22, meterWeights: { "4/4": 7, "7/8": 2, "5/4": 1 } },
+  "Matteo Mancuso": { accentTones: [1, 3, 2, 0], pickup: 0.25, meterWeights: { "4/4": 9, "6/8": 2, "7/8": 1 } },
+  "Yngwie Malmsteen": { accentTones: [0, 2, 1, 0], pickup: 0.08, pedalEvery: 4, meterWeights: { "4/4": 8, "6/8": 2 } },
 };
 
 const rhythmBooks: Record<RiffKind, RhythmCell[]> = {
@@ -185,13 +188,8 @@ function parseChord(chord: string) {
 
 function chordPcs(chord: string) {
   const { root, quality } = parseChord(chord);
-  if (quality.includes("dim")) return [root, mod(root + 3), mod(root + 6), mod(root + 9)];
-  if (quality.includes("m7b5")) return [root, mod(root + 3), mod(root + 6), mod(root + 10)];
-  if (quality.includes("sus")) return [root, mod(root + 5), mod(root + 7), mod(root + 10)];
-  if (quality.includes("m") && !quality.includes("maj")) return [root, mod(root + 3), mod(root + 7), mod(root + (quality.includes("7") || quality.includes("9") || quality.includes("11") ? 10 : 12))];
-  if (quality.includes("7") && !quality.includes("maj")) return [root, mod(root + 4), mod(root + 7), mod(root + 10)];
-  if (quality.includes("maj7")) return [root, mod(root + 4), mod(root + 7), mod(root + 11)];
-  return [root, mod(root + 4), mod(root + 7), mod(root + 2)];
+  const tones = chordTonesForQuality(root, quality);
+  return tones.length === 3 ? [...tones, tones[0]] : tones;
 }
 
 function candidatesForPc(string: number, pc: number, nearFret: number) {
@@ -291,7 +289,7 @@ function scaleFor(center: number, mode: Mode, artist: Artist) {
   const minor = [0, 2, 3, 5, 7, 8, 10];
   const scale = mode === "minor" ? minor : major;
   if (artist === "Yngwie Malmsteen") return [0, 2, 3, 5, 7, 8, 11].map((interval) => mod(center + interval));
-  if (artist === "Owane" || artist === "CHON") return scale.map((interval) => mod(center + interval)).concat([mod(center + 6)]);
+  if (artist === "Owane" && mode === "major") return [0, 2, 4, 6, 7, 9, 11].map((interval) => mod(center + interval));
   return scale.map((interval) => mod(center + interval));
 }
 
@@ -302,33 +300,38 @@ function phraseMotionFor(bar: number, bars: number, section: SectionType): Phras
   return bar % 2 ? "answer" : "development";
 }
 
-function shapeCell(cell: RhythmCell, motion: PhraseMotion, pickup: number) {
-  if (motion === "statement" || motion === "arrival") return cell;
-  const amount = motion === "answer" ? pickup : pickup * 1.45;
-  const times = cell.times.map((time, index) => index === 0 ? time : Math.min(3.82, Math.max(0.08, time + (index % 2 ? amount : -amount * 0.45))));
-  return { ...cell, times };
+function shapeCell(cell: RhythmCell, motion: PhraseMotion, pickup: number): RhythmCell {
+  const times = [...cell.times]; const durations = [...cell.durations];
+  // Displace a whole gesture on the beat grid; independent jitter destroyed its pocket.
+  if (motion === "answer" && pickup >= .15) {
+    for (let i = 0; i < times.length; i += 1) times[i] += .25;
+  }
+  const keep = times.map((_, i) => i).filter((i) => times[i] < (motion === "arrival" ? 3.1 : 3.85));
+  const last = keep.at(-1)!;
+  if (motion === "arrival" || motion === "answer") durations[last] = Math.max(durations[last], 3.85 - times[last]);
+  return { ...cell, times: keep.map((i) => times[i]), durations: keep.map((i) => durations[i]), accents: keep.flatMap((i, n) => cell.accents.includes(i) ? [n] : []) };
 }
 
 function makeRiffPlans(profile: PerformanceProfile, artist: Artist, bars: number, section: SectionType, complexity: number) {
-  const cells = rhythmBooks[profile.riff]; const used = new Set<string>(); const plans: RiffBarPlan[] = [];
+  const phrasing = phrasingProfiles[artist];
+  const available = [...rhythmBooks[profile.riff], ...(phrasing.cells ?? [])];
+  const cells = available.filter((cell) => phrasing.rhythms.includes(cell.id));
+  const motif = choose(phrasing.contours); const statement = choose(cells);
+  const variation = Math.floor(Math.random() * 8) + complexity;
+  const plans: RiffBarPlan[] = [];
   for (let bar = 0; bar < bars; bar += 1) {
     const phraseMotion = phraseMotionFor(bar, bars, section);
-    let choices = cells.filter((cell) => cell.id !== plans.at(-1)?.id);
-    if (complexity === 5) {
-      const reserveCadence = bar < bars - 1 ? cells.find((cell) => cell.cadence)?.id : undefined;
-      const unique = choices.filter((cell) => !used.has(cell.id) && cell.id !== reserveCadence);
-      if (unique.length) choices = unique;
-    }
-    if (phraseMotion === "arrival" && section !== "Intro") {
-      const arrivals = choices.filter((cell) => cell.cadence && (complexity < 5 || !used.has(cell.id)));
-      if (arrivals.length) choices = arrivals;
-    }
-    const unused = cells.filter((cell) => !used.has(cell.id));
-    const shouldRecall = bar === 2 && complexity < 5 && ["pedal", "interlock", "angular", "sequence"].includes(profile.riff);
-    const recalled = shouldRecall ? cells.find((cell) => cell.id === plans[0]?.id) : undefined;
-    const selected = recalled ?? choose(choices.length ? choices : unused.length ? unused : cells);
+    // Recall a recognizable idea every two bars, with a changed ending as it develops.
+    const recall = bar % 2 === 0;
+    const alternatives = cells.filter((cell) => cell.id !== plans.at(-1)?.id);
+    const selected = recall ? statement : choose(alternatives.length ? alternatives : cells);
+    const contour = motif.map((degree, i) => {
+      if (phraseMotion === "answer" && i > 1) return -Math.round(degree * .65);
+      if (phraseMotion === "development" && i > 2) return degree + (bar % 4 === 2 ? 1 : -1);
+      return degree;
+    });
     const shaped = shapeCell(selected, phraseMotion, artistMotifs[artist].pickup);
-    used.add(selected.id); plans.push({ ...shaped, variation: Math.floor(Math.random() * 8) + bar * 3 + complexity, phraseMotion });
+    plans.push({ ...shaped, variation, phraseMotion, contour });
   }
   return plans;
 }
@@ -382,34 +385,82 @@ function accentToneFor(artist: Artist, tones: number[], bar: number, phraseIndex
   return tones[mod(index, tones.length)];
 }
 
-function riffForBar(profile: PerformanceProfile, artist: Artist, section: SectionType, chord: string, center: number, mode: Mode, bar: number, barStart: number, barBeats: number, complexity: number, plan: RiffBarPlan, cursor: RiffCursor) {
+function activeChordAt(harmony: HarmonyEvent[], time: number, fallback: string) {
+  return harmony.findLast((event) => event.time <= time + 1e-6)?.chord ?? fallback;
+}
+
+function nearestPc(tones: number[], near: number) {
+  return [...tones].sort((a, b) => Math.min(mod(a - near), mod(near - a)) - Math.min(mod(b - near), mod(near - b)))[0];
+}
+
+function scaleForChord(chord: string, regionalScale: number[]) {
+  const { root, quality } = parseChord(chord);
+  const tones = chordPcs(chord);
+  if (tones.every((pc) => regionalScale.includes(pc))) return regionalScale;
+  const intervals = quality.includes("alt") ? [0, 1, 3, 4, 6, 8, 10]
+    : quality.includes("dim") ? [0, 2, 3, 5, 6, 8, 9, 11]
+    : quality.includes("m7b5") ? [0, 1, 3, 5, 6, 8, 10]
+    : /^m(?!aj)/.test(quality) ? [0, 2, 3, 5, 7, 9, 10]
+    : quality.includes("b9") ? [0, 1, 4, 5, 7, 8, 10]
+    : quality.includes("maj") ? [0, 2, 4, quality.includes("#11") ? 6 : 5, 7, 9, 11]
+    : /7|9|13/.test(quality) && !quality.includes("add") && !quality.includes("6/9") ? [0, 2, 4, quality.includes("#11") ? 6 : 5, 7, 9, 10]
+    : [0, 2, 4, 5, 7, 9, 11];
+  return intervals.map((interval) => mod(root + interval));
+}
+
+function riffForBar(profile: PerformanceProfile, artist: Artist, section: SectionType, chord: string, center: number, mode: Mode, bar: number, barStart: number, barBeats: number, complexity: number, plan: RiffBarPlan, cursor: RiffCursor, harmony: HarmonyEvent[]) {
+  const phrasing = phrasingProfiles[artist];
   const sourceIndexes = (section === "Intro" || section === "Outro") ? plan.times.map((_, index) => index).filter((index) => index % 2 === 0 || index === plan.times.length - 1) : plan.times.map((_, index) => index);
   const hitIndexes = complexity === 1 ? sourceIndexes.filter((_, index) => index % 2 === 0 || index === sourceIndexes.length - 1) : sourceIndexes;
-  const tones = chordPcs(chord); const scale = scaleFor(center, mode, artist);
   const texture: TextureState = { singles: 0, dyads: 0, triads: 0, lastSize: 1 };
-  return hitIndexes.map((sourceIndex, phraseIndex) => {
-    const localTime = plan.times[sourceIndex] * (barBeats / 4); const isAccent = plan.accents.includes(sourceIndex) || phraseIndex === 0 || phraseIndex === hitIndexes.length - 1;
-    const lastPc = mod(cursor.midi); const scaleIndex = scale.indexOf(lastPc);
-    const motif = artistMotifs[artist]; const contour = motif.contour[mod(plan.variation + phraseIndex + bar, motif.contour.length)];
-    const step = profile.steps[mod(plan.variation + phraseIndex + bar, profile.steps.length)] + contour;
-    const pedalHit = motif.pedalEvery !== undefined && phraseIndex % motif.pedalEvery === 0;
-    const targetPc = isAccent || pedalHit ? accentToneFor(artist, tones, bar, phraseIndex, plan.phraseMotion) : scale[mod((scaleIndex < 0 ? plan.variation : scaleIndex) + step, scale.length)];
-    const targetMidi = targetPitchForPc(targetPc, cursor.midi + (isAccent ? 0 : (plan.variation % 3) - 1), profile.comfort);
+  const baseScale = scaleFor(center, mode, artist);
+  const openingTones = chordPcs(activeChordAt(harmony, barStart + plan.times[hitIndexes[0]] * barBeats / 4, chord));
+  const openingPc = accentToneFor(artist, openingTones, bar % 2, 0, plan.phraseMotion);
+
+  // Plan targets before realizing fingerings so approach notes know their destination.
+  const targets = hitIndexes.map((sourceIndex, phraseIndex) => {
+    const time = barStart + plan.times[sourceIndex] * barBeats / 4;
+    const activeChord = activeChordAt(harmony, time, chord);
+    const tones = chordPcs(activeChord);
+    const last = phraseIndex === hitIndexes.length - 1;
+    const accent = plan.accents.includes(sourceIndex) || phraseIndex === 0 || last;
+    const degree = plan.contour[phraseIndex % plan.contour.length];
+    const scale = scaleForChord(activeChord, baseScale);
+    const anchorIndex = scale.indexOf(nearestPc(scale, openingPc));
+    const desired = scale[mod(anchorIndex + degree, scale.length)];
+    const pedal = artistMotifs[artist].pedalEvery;
+    let pc = accent ? nearestPc(tones, desired) : desired;
+    if (pedal && phraseIndex % pedal === 0) pc = tones[0];
+    else if (!accent && complexity >= 3 && Math.random() < phrasing.arpeggio) pc = tones[mod(phraseIndex + plan.variation, tones.length)];
+    if (last && plan.phraseMotion === "arrival") pc = tones[section === "Pre-chorus" ? 1 : 0];
+    return { time, pc, tones, accent, last, sourceIndex };
+  });
+  if (complexity >= 3) targets.forEach((target, i) => {
+    const next = targets[i + 1];
+    if (!target.accent && next?.accent && next.time - target.time <= .55 && Math.random() < phrasing.approach) {
+      target.pc = mod(next.pc + (plan.variation % 2 ? -1 : 1));
+    }
+  });
+  return targets.map((target, phraseIndex) => {
+    const { time, pc, tones, accent, last, sourceIndex } = target;
+    const targetMidi = targetPitchForPc(pc, cursor.midi, profile.comfort);
     const [root, third, fifth, color] = tones;
-    const requestedSize = textureSizeFor(profile, plan, bar, phraseIndex, hitIndexes.length - phraseIndex - 1, complexity, isAccent, texture);
-    let fragment = playableFragmentFor(profile, targetPc, targetMidi, requestedSize, voicingsFor(profile, artist, root, third, fifth, color), cursor);
-    if (requestedSize > 1) {
-      const actualSize = fragment.notes.length;
-      const exceedsTexture = (actualSize === 2 && texture.dyads >= profile.texture.maxDyads) || (actualSize === 3 && texture.triads >= profile.texture.maxTriads);
-      if (exceedsTexture) fragment = playableFragmentFor(profile, targetPc, targetMidi, 1, [], cursor);
+    const nextTime = targets[phraseIndex + 1]?.time ?? barStart + barBeats;
+    const room = nextTime - time;
+    // Fast passages stay monophonic; a grip on every accent interrupts a line.
+    const requestedSize = room < .4 ? 1 : textureSizeFor(profile, plan, bar, phraseIndex, targets.length - phraseIndex - 1, complexity, accent, texture);
+    let fragment = playableFragmentFor(profile, pc, targetMidi, requestedSize, voicingsFor(profile, artist, root, third, fifth, color), cursor);
+    if ((fragment.notes.length === 2 && texture.dyads >= profile.texture.maxDyads) || (fragment.notes.length === 3 && texture.triads >= profile.texture.maxTriads)) {
+      fragment = playableFragmentFor(profile, pc, targetMidi, 1, [], cursor);
     }
     recordTexture(texture, fragment.notes.length);
-    cursor.midi = fragment.anchor.midi;
-    cursor.anchor = fragment.anchor;
-    cursor.gripCenter = fragment.center;
-    cursor.handPosition = clamp(Math.round(fragment.center), 1, 10);
-    const duration = Math.min((plan.durations[sourceIndex] ?? 0.4) * (barBeats / 4), Math.max(0.14, barBeats - localTime - 0.04));
-    return { time: barStart + localTime, duration, notes: fragment.notes, velocity: 0.5 + Math.min(complexity, 4) * 0.07 + (isAccent ? 0.08 : 0) };
+    cursor.midi = fragment.anchor.midi; cursor.anchor = fragment.anchor;
+    cursor.gripCenter = fragment.center; cursor.handPosition = clamp(Math.round(fragment.center), 1, 10);
+    const sustain = last && ["answer", "arrival"].includes(plan.phraseMotion);
+    const duration = Math.max(.06, Math.min(room - .015, sustain ? room * .88 : (phrasing.gate >= .9 ? Math.max(plan.durations[sourceIndex] * barBeats / 4, room * phrasing.gate) : plan.durations[sourceIndex] * barBeats / 4 * phrasing.gate) * (accent ? 1 : .94)));
+    const arch = Math.sin((phraseIndex + 1) / (targets.length + 1) * Math.PI);
+    const velocity = clamp(.56 + complexity * .025 + (accent ? phrasing.dynamicRange : .03) + arch * .055 - (last && plan.phraseMotion === "answer" ? .055 : 0), .45, .95);
+    return { time, duration, notes: fragment.notes, velocity };
   });
 }
 
@@ -425,7 +476,11 @@ function chordVoicingPlans(artist?: Artist) {
 /** Builds a color-preserving voicing from physically playable, contiguous
  * string sets. `variant` changes the grip without changing the chord tones. */
 export function createChordPreview(chord: string, position = 5, artist?: Artist, variant = 0, compact = false): PerformanceEvent {
-  const tones = chordPcs(chord);
+  const allTones = chordPcs(chord);
+  // In extended voicings the third and seventh define the quality. Drop the
+  // fifth before either guide tone; otherwise maj9 and dominant9 sound alike.
+  const extended = allTones.length > 4;
+  const tones = extended ? [allTones[0], allTones[1], allTones.at(-1)!, allTones[3]] : allTones;
   const candidates = chordVoicingPlans(artist).flatMap((indexes, planIndex) => {
     const pcs = indexes.reduce<number[]>((result, index) => {
       const pc = tones[index];
@@ -444,10 +499,13 @@ export function createChordPreview(chord: string, position = 5, artist?: Artist,
     const pitchSpread = Math.max(...grip.notes.map((note) => note.midi)) - Math.min(...grip.notes.map((note) => note.midi));
     if (frettedFingers > 4 || pitchSpread > 20) return [];
     const colorPresent = grip.notes.some((note) => mod(note.midi) === tones[3]);
-    const score = grip.score + planIndex * .22 + (colorPresent ? 0 : 40) + (grip.notes.length === 4 ? (compact ? 8 : -.5) : 0);
-    return [{ ...grip, score }];
+    const missingGuides = extended ? [tones[1], tones[2]].filter((pc) => !grip.notes.some((note) => mod(note.midi) === pc)).length : 0;
+    const score = grip.score + missingGuides * 75 + planIndex * .22 + (colorPresent ? 0 : 40) + (grip.notes.length === 4 ? (compact ? 8 : -.5) : 0);
+    return [{ ...grip, score, missingGuides, colorPresent }];
   }).sort((a, b) => a.score - b.score);
-  const pool = candidates.slice(0, Math.min(5, candidates.length));
+  const complete = candidates.filter((candidate) => candidate.missingGuides === 0 && candidate.colorPresent);
+  const eligible = complete.length ? complete : candidates;
+  const pool = eligible.slice(0, Math.min(5, eligible.length));
   const chosen = pool[mod(variant + chord.split("").reduce((sum, letter) => sum + letter.charCodeAt(0), 0), Math.max(1, pool.length))];
   if (chosen) return { time: 0, duration: 0.92, notes: chosen.notes, velocity: 0.75 };
   const color = tones[3]; const anchor = locateLeadPc(color, 67, position + 1);
@@ -664,8 +722,8 @@ function drumTrackForSection(profile: PerformanceProfile, section: SectionType, 
 
 export function createPerformanceIdea(artist: Artist, section: SectionType, progression: string[], localCenters: number[], mode: Mode, complexity: number, rhythmComplexity = 2): PerformanceIdea {
   const profile = performanceProfiles[artist]; const meterMap = meterMapFor(profile, artist, progression.length, rhythmComplexity); const plans = makeRiffPlans(profile, artist, progression.length, section, complexity); const cursor: RiffCursor = { midi: 59 + complexity, handPosition: profile.position };
-  const riff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, meterMap.starts[bar], meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor));
   const harmony = harmonyForSection(profile, artist, progression, meterMap, rhythmComplexity);
+  const riff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, meterMap.starts[bar], meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor, harmony));
   const chordRhythm = chordRhythmForSection(profile, artist, progression, meterMap, section, riff);
   const bass = bassForSection(profile, progression, meterMap, chordRhythm, riff, complexity);
   const drums = drumTrackForSection(profile, section, meterMap, chordRhythm, riff, rhythmComplexity);
@@ -700,7 +758,7 @@ export function completePerformanceIdea(artist: Artist, section: SectionType, pr
 export function regenerateRiffIdea(artist: Artist, section: SectionType, progression: string[], localCenters: number[], mode: Mode, complexity: number, source: PerformanceIdea): PerformanceIdea {
   const profile = performanceProfiles[artist]; const plans = makeRiffPlans(profile, artist, progression.length, section, complexity);
   const cursor: RiffCursor = { midi: 59 + complexity, handPosition: profile.position };
-  const riff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, source.meterMap.starts[bar], source.meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor));
+  const riff = progression.flatMap((chord, bar) => riffForBar(profile, artist, section, chord, localCenters[bar] ?? localCenters[0], mode, bar, source.meterMap.starts[bar], source.meterMap.meters[bar].beatsPerBar, complexity, plans[bar], cursor, source.harmony));
   return { ...source, riffStyle: profile.riffLabel, riff };
 }
 
@@ -737,6 +795,7 @@ export function scorePerformanceIdea(artist: Artist, section: SectionType, idea:
   const events = idea.riff.slice().sort((a, b) => a.time - b.time);
   if (!events.length) return -1000;
   let score = 0;
+  const barCount = Math.max(1, idea.meterMap.meters.length);
   let singles = 0; let dyads = 0; let triads = 0;
   let awkwardMoves = 0;
   let lastLead: FretNote | undefined;
@@ -764,17 +823,19 @@ export function scorePerformanceIdea(artist: Artist, section: SectionType, idea:
     lastLead = lead; lastCenter = center;
   });
 
-  score -= awkwardMoves * 8.5;
+  score = score / events.length * 4;
+  score -= awkwardMoves / Math.max(1, events.length - 1) * 35;
+  singles /= barCount; dyads /= barCount; triads /= barCount;
   score += singles >= profile.texture.minSingles ? 5 : -8;
   score += Math.min(dyads, profile.texture.maxDyads) * 1.35 + Math.min(triads, profile.texture.maxTriads) * 1.65;
   score -= Math.max(0, dyads - profile.texture.maxDyads) * 4 + Math.max(0, triads - profile.texture.maxTriads) * 5;
-  if (["interlock", "angular", "pedal", "fusion"].includes(profile.riff) && dyads + triads === 0) score -= 5.5;
+  if (["interlock", "angular", "pedal"].includes(profile.riff) && dyads + triads === 0) score -= 5.5;
 
   const barRhythms = idea.meterMap.meters.map((meter, bar) => rhythmSignature(events, idea.meterMap.starts[bar], idea.meterMap.starts[bar] + meter.beatsPerBar));
   const uniqueRhythms = new Set(barRhythms).size;
   const targetRhythms = profile.riff === "sequence" ? 2 : profile.riff === "pedal" || profile.riff === "interlock" ? 3 : 3;
   score += uniqueRhythms >= targetRhythms ? 6 : uniqueRhythms * 1.2;
-  if (barRhythms.length > 2 && barRhythms[0] === barRhythms[2]) score += profile.riff === "pedal" || profile.riff === "sequence" ? 2.5 : -1.2;
+  if (barRhythms.length > 2 && barRhythms[0] === barRhythms[2]) score += 2.5;
   if (barRhythms.length > 1 && barRhythms.every((signature) => signature === barRhythms[0])) score -= 10;
 
   const allowedMeters = new Set(profile.meters.map((meter) => meter.label));
@@ -839,5 +900,56 @@ export function scorePerformanceIdea(artist: Artist, section: SectionType, idea:
   const coveredAccents = sharedAccentTimes.filter((time) => nearestTimeDistance(time, drums) <= .09 || kickTimes.some((kick) => Math.abs(kick - time) <= .09)).length;
   score += Math.min(10, coveredAccents) * .42;
   if (!drums.length || !bass.length || !stabTimes.length) score -= 12;
+  return score + scorePhraseIntelligence(artist, section, idea);
+}
+
+/** Bounded musical features: adding more notes cannot buy a better score. */
+export function scorePhraseIntelligence(artist: Artist, section: SectionType, idea: PerformanceIdea) {
+  const style = phrasingProfiles[artist];
+  const events = [...idea.riff].sort((a, b) => a.time - b.time);
+  if (!events.length || events.some((event) => !event.notes.length)) return -100;
+  const bars = idea.meterMap.meters.map((meter, bar) => events.filter((event) => event.time >= idea.meterMap.starts[bar] && event.time < idea.meterMap.starts[bar] + meter.beatsPerBar));
+  let harmonic = 0; let unresolved = 0; let repeated = 0; let overlaps = 0;
+  events.forEach((event, i) => {
+    const lead = highestNote(event)!; const next = events[i + 1];
+    const chord = activeChordAt(idea.harmony, event.time, idea.harmony[0]?.chord ?? "C");
+    const tones = chordPcs(chord); const stable = tones.includes(mod(lead.midi));
+    const nextLead = highestNote(next);
+    const resolves = nextLead && Math.abs(nextLead.midi - lead.midi) <= 2 && chordPcs(activeChordAt(idea.harmony, next.time, chord)).includes(mod(nextLead.midi));
+    if (stable) harmonic += 1;
+    else if (resolves && next.time - event.time <= .6) harmonic += .7;
+    else if (event.duration > .65) unresolved += 1;
+    if (i >= 3 && events.slice(i - 3, i).every((prior) => highestNote(prior)?.midi === lead.midi)) repeated += 1;
+    if (next && event.time + event.duration > next.time + .01) overlaps += 1;
+  });
+  let score = harmonic / events.length * 16 - unresolved / events.length * 28 - overlaps / events.length * 30;
+  score -= repeated / events.length * (artist === "Waxamilion" ? 8 : 30);
+  let densityFit = 0; let breathing = 0; let endings = 0;
+  bars.forEach((barEvents, bar) => {
+    if (!barEvents.length) { densityFit -= 8; return; }
+    const beats = idea.meterMap.meters[bar].beatsPerBar;
+    const density = barEvents.length / beats;
+    const sparseSection = section === "Intro" || section === "Outro";
+    const low = style.density[0] * (sparseSection ? .5 : .65);
+    const high = style.density[1] * (sparseSection ? .8 : 1);
+    densityFit += density >= low && density <= high ? 6 : -Math.min(12, Math.abs(density - (density < low ? low : high)) * 10);
+    const occupied = barEvents.reduce((sum, event) => sum + event.duration, 0) / beats;
+    breathing += occupied < .96 && occupied > .2 ? 2 : -3;
+    const last = barEvents.at(-1)!;
+    const chord = activeChordAt(idea.harmony, last.time, idea.harmony.at(-1)?.chord ?? "C");
+    if (chordPcs(chord).includes(mod(highestNote(last)!.midi))) endings += 3;
+  });
+  score += (densityFit + breathing + endings) / Math.max(1, bars.length);
+  // Reward a remembered contour with variation, not identical bars throughout.
+  const contour = (line: PerformanceEvent[]) => line.slice(1, 4).map((event, i) => Math.sign(highestNote(event)!.midi - highestNote(line[i])!.midi));
+  let recall = 0; let comparisons = 0;
+  for (let bar = 2; bar < bars.length; bar += 2) {
+    const a = contour(bars[0]); const b = contour(bars[bar]);
+    const count = Math.min(a.length, b.length);
+    if (count) { recall += a.slice(0, count).filter((direction, i) => direction === b[i]).length / count; comparisons += 1; }
+  }
+  if (comparisons) score += recall / comparisons * 6;
+  const velocities = events.map((event) => event.velocity);
+  score += Math.max(...velocities) - Math.min(...velocities) >= style.dynamicRange * .6 ? 3 : -3;
   return score;
 }

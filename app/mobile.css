@@ -1,3 +1,80 @@
-body { -webkit-tap-highlight-color: transparent; }
-button { touch-action: manipulation; }
-button:active { transform: scale(.98); }
+@media (max-width: 1000px) and (min-width: 761px) {
+  .layout { grid-template-columns: 254px minmax(0, 1fr); }
+  .sidebar { padding: 28px 18px; }
+  .workspace { padding: 28px 20px 64px; }
+  .part-body, .draft-body { padding: 18px; }
+  .riff-navigator { grid-template-columns: 26px minmax(0, 1fr) 26px; gap: 6px; }
+  .fret-nav { width: 26px; }
+}
+@media (max-width: 760px) {
+  .topbar { min-height: 60px; padding: 0 20px; gap: 16px; }
+  .topbar-label { display: none; }
+  .brand { font-size: 18px; }
+  .new-song { min-height: 40px; font-size: 11px; }
+  .layout { display: block; }
+  .sidebar { padding: 24px 20px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .sidebar-heading { margin-bottom: 18px; }
+  .sidebar-heading h1 { font-size: 17px; }
+  .field-stack { margin-bottom: 18px; gap: 8px; }
+  .field-label { min-height: 32px; }
+  .profile-info-button { min-height: 32px; }
+  select { font-size: 16px; min-height: 46px; }
+  .control-pair { gap: 14px; }
+  .shape-controls { padding-top: 20px; display: grid; grid-template-columns: 1fr 1fr; column-gap: 24px; }
+  .shape-controls .modulation { grid-column: 1 / -1; }
+  .shape-controls label { font-size: 11px; }
+  .pill-slider { height: 34px; }
+  .pill-slider::-webkit-slider-thumb { width: 18px; height: 18px; margin-top: -7.5px; }
+  .pill-slider::-moz-range-thumb { width: 16px; height: 16px; }
+  .generate-row { margin-top: 4px; grid-template-columns: minmax(0, 1fr) 48px; }
+  .generate, .random-settings { min-height: 48px; }
+  .profile-note { margin-top: 14px; font-size: 10px; }
+  .workspace { padding: 26px 16px 48px; }
+  .workspace-heading { margin: 0 4px 20px; }
+  .workspace-heading h2 { font-size: 23px; }
+  .empty-state { min-height: 250px; padding: 32px 20px; }
+  .empty-state h3 { font-size: 19px; }
+  .part-body, .draft-body { padding: 18px 14px; border-radius: 7px; }
+  .part-meta { font-size: 13px; gap: 7px; }
+  .harmony-center { font-size: 10px; margin-left: 12px; }
+  .draft-label { margin-bottom: 18px; }
+  .chord-chart { gap: 6px; margin-top: 20px; }
+  .chart-chord { min-height: 65px; font-size: 14px; padding: 9px 8px; }
+  .bar-number { font-size: 9px; }
+  .idea-controls { margin: 20px 0; gap: 12px; }
+  .play-idea, .midi-button, .harmony-toggle { min-height: 44px; }
+  .harmony-toggle { padding: 0 10px; }
+  .midi-button { padding: 0 12px; }
+  .track-controls { display: grid; grid-template-columns: repeat(4, auto); gap: 5px; }
+  .track-controls button { min-height: 44px; padding: 0 7px; gap: 5px; font-size: 10px; }
+  .tempo-control { gap: 10px; min-height: 40px; }
+  .track-view-selector select { font-size: 16px; width: 172px; min-height: 44px; }
+  .riff-navigator { grid-template-columns: 1fr 1fr; grid-template-areas: "stage stage" "previous next"; gap: 10px; }
+  .riff-fret-stage { grid-area: stage; }
+  .fret-nav { width: 100%; min-height: 44px; font-size: 26px; }
+  .fret-nav.previous { grid-area: previous; }
+  .fret-nav.next { grid-area: next; }
+  .fret-numbers, .fret-string { grid-template-columns: 18px repeat(13, minmax(0, 1fr)); }
+  .fret-string, .fret { height: 26px; }
+  .fret.active::after { width: 11px; height: 11px; }
+  .riff-timeline { gap: 0; }
+  .playback-help summary { min-height: 44px; display: flex; align-items: center; }
+  .playback-help summary::before { content: "+"; margin-right: 7px; }
+  .playback-help[open] summary::before { content: "−"; }
+  .draft-actions { gap: 8px; margin-top: 12px; }
+  .draft-actions button { flex: 1; min-height: 46px; padding: 0 10px; }
+  .remove { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 370px) {
+  .topbar { padding: 0 16px; }
+  .sidebar { padding: 20px 16px; }
+  .shape-controls { column-gap: 16px; }
+  .shape-controls label { font-size: 10px; }
+  .workspace { padding-left: 10px; padding-right: 10px; }
+  .part-body, .draft-body { padding-left: 12px; padding-right: 12px; }
+  .transport-controls { gap: 5px; }
+  .harmony-toggle { padding: 0 8px; }
+  .midi-button { padding: 0 10px; }
+  .track-controls { grid-template-columns: 1fr 1fr; }
+  .chart-chord { font-size: 12px; padding: 8px 6px; }
+}

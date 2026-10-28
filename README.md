@@ -1,6 +1,6 @@
 # Riffizer
 
-Riffizer is a mobile-first guitar idea generator. It creates four-bar chord
+Riffizer is a mobile-first guitar idea generator. It creates 4-, 8-, or 12-bar chord
 charts and playable, original riff ideas guided by artist-inspired high-level
 composition profiles.
 
@@ -31,10 +31,69 @@ composition profiles.
 - Has separate controls for melodic/harmonic complexity, chord placement and
   meter, internal modulation, and tempo.
 - Includes original high-level profiles for Nick Johnston, Moray Pringle, Owane,
-  Waxamilion, CHON, Marco Sfogli, Guthrie Govan, Greg Howe, and Yngwie Malmsteen.
+  Waxamilion, CHON, Marco Sfogli, Guthrie Govan, Greg Howe, Yngwie Malmsteen,
+  and Matteo Mancuso (**Silk Current** in the interface).
 
 Profiles use broad composition and playability tendencies only. They do not
 contain transcriptions, tabs, sampled performances, or copied song material.
+
+## Phrasing and harmony
+
+Each profile has its own harmonic vocabulary, phrase contours, preferred rhythm
+cells, articulation lengths, dynamics, approach-note probability, arpeggio
+weighting, and density range. A section establishes a motif, answers it, develops
+it, and lands it. Recalled gestures keep a common contour instead of restarting
+with unrelated random scale steps in each bar.
+
+| Profile inspiration | Harmonic emphasis | Phrase emphasis |
+| --- | --- | --- |
+| Nick Johnston | Suspensions, borrowed minor color, plagal returns | Spacious melodic arcs and sustained answers |
+| Moray Pringle | Rock foundations, blues colors, dominant lift | Accented groove, repeated anchors, short replies |
+| Owane | Major extensions, Lydian color, pedal motion | Displaced accents and angular arpeggio shapes |
+| Waxamilion | Pedals, planed colors, asymmetric pivots | Clipped fragments, gaps, recurring pedal tones |
+| CHON | Bright extended chords, common tones, plagal motion | Interlocking rhythms and arpeggiated contours |
+| Marco Sfogli | Lyrical rock progressions and decisive cadences | Broad melodic arcs, long notes, clear arrivals |
+| Guthrie Govan | Blues/fusion changes and backdoor resolutions | Elastic contours and short resolved chromatic approaches |
+| Greg Howe | Dominant cycles, moving roots, extended tonics | Compact linear gestures and syncopated accents |
+| Yngwie Malmsteen | Minor-key sequences, diminished links, V–i | Sequenced contours, pedal returns, harmonic-minor color |
+| Silk Current / Matteo Mancuso | Major/minor ninths, ii–V and backdoor motion | Fluid single-note bursts, fourth-shaped contours, extended arpeggios, triplets |
+
+Harmony and performance share one chord-quality parser, including major ninths,
+minor sixths, 6/9, suspended seconds, and altered extensions. Lead targets follow
+the actual harmony onset, including early and late changes. Short chromatic
+approaches have a planned resolution; long endings land on the active chord.
+Candidate scoring measures harmonic fit, phrase recall, density, space, dynamics,
+and playability. Per-note bonuses are normalized, and texture limits are measured
+per bar, so length or sheer note count does not dominate the choice.
+
+These are hand-authored interpretations, not trained artist replicas. Instrument
+samples and MIDI note lengths/velocities approximate articulation; the engine does
+not synthesize authentic finger attack, bends, slides, or vibrato.
+
+Design references include Matteo Mancuso's own descriptions of
+[arpeggios, legato, and melodic storytelling](https://www.guitarworld.com/features/matteo-mancuso-talks-tone-technique-and-guthrie-govan)
+and [fingerstyle fourths and triplet accents](https://www.guitarplayer.com/guitarists/matteo-mancuso-on-why-he-plays-fingerstyle-on-electric-and-how-he-got-steve-vai-to-work-with-him),
+plus CHON's discussion of
+[rhythmic displacement and layered harmony](https://www.earthquakerdevices.com/blog-posts/chon-koalas-are-just-super-baked-all-day).
+The numeric weights and original contours are implementation choices, not
+measurements of recordings.
+
+## Interface
+
+A restrained dark workspace groups composition settings, chord audition, playback
+tracks, tempo, and fretboard navigation. All capabilities remain accessible on
+mobile. **About profile** explains the selected style; **Playback & export**
+contains usage details. The standalone website still exports five-track MIDI,
+and the Logic plug-in retains its channel and track export options.
+
+## Validation
+
+`npm run test:engine` checks chord spellings in every key, all ten profiles across
+4/8/12-bar forms, simple/complex and mixed-meter settings, playable fingerings,
+phrase landings, non-overlapping lead notes, riff-only regeneration, legacy
+completion, scoring regressions, and distinct Silk Current behavior. `npm test`
+also runs the hosted build and rendered-page test. `npm run build:pages` verifies
+the static mirror output.
 
 ## GitHub Pages mirror
 
